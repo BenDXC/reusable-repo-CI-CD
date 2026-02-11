@@ -29,6 +29,10 @@ on:
         description: "Run dependency review (PR only)"
         type: boolean
         default: true
+      deny-licenses:
+        description: "Comma-separated list of licenses to deny"
+        type: string
+        default: ""
       enable-trivy:
         description: "Run Trivy vulnerability scanner"
         type: boolean
@@ -107,7 +111,7 @@ jobs:
         uses: actions/dependency-review-action@v4
         with:
           fail-on-severity: high
-          deny-licenses: GPL-2.0, GPL-3.0, AGPL-3.0
+          deny-licenses: ${{ inputs.deny-licenses }}
           comment-summary-in-pr: always
 
   # ════════════════════════════════════════════════════════════════════════

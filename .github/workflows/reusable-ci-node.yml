@@ -133,32 +133,20 @@ jobs:
       # ── Lint ──────────────────────────────────────────────────────────
       - name: Lint
         if: inputs.enable-lint
-        run: |
-          if ${{ inputs.package-manager }} run --if-present ${{ inputs.lint-script }} 2>/dev/null; then
-            echo "Lint completed"
-          else
-            echo "::warning::Lint script '${{ inputs.lint-script }}' not found, skipping"
-          fi
+        continue-on-error: false
+        run: ${{ inputs.package-manager }} run ${{ inputs.lint-script }}
 
       # ── Test ──────────────────────────────────────────────────────────
       - name: Run tests
         if: inputs.enable-test
-        run: |
-          if ${{ inputs.package-manager }} run --if-present ${{ inputs.test-script }} 2>/dev/null; then
-            echo "Tests completed"
-          else
-            echo "::warning::Test script '${{ inputs.test-script }}' not found, skipping"
-          fi
+        continue-on-error: false
+        run: ${{ inputs.package-manager }} run ${{ inputs.test-script }}
 
       # ── Build ─────────────────────────────────────────────────────────
       - name: Build
         if: inputs.enable-build
-        run: |
-          if ${{ inputs.package-manager }} run --if-present ${{ inputs.build-script }} 2>/dev/null; then
-            echo "Build completed"
-          else
-            echo "::warning::Build script '${{ inputs.build-script }}' not found, skipping"
-          fi
+        continue-on-error: false
+        run: ${{ inputs.package-manager }} run ${{ inputs.build-script }}
         env:
           NODE_ENV: production
 

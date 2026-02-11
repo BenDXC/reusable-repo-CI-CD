@@ -161,7 +161,7 @@ jobs:
       - name: Lint with ruff
         if: inputs.enable-lint
         run: |
-          pip install ruff
+          command -v ruff >/dev/null 2>&1 || pip install ruff
           ruff check ${{ inputs.ruff-args }} .
           ruff format --check .
 
@@ -169,14 +169,14 @@ jobs:
       - name: Type check with mypy
         if: inputs.enable-type-check
         run: |
-          pip install mypy
+          command -v mypy >/dev/null 2>&1 || pip install mypy
           mypy .
 
       # ── Test ──────────────────────────────────────────────────────────
       - name: Run tests with pytest
         if: inputs.enable-test
         run: |
-          pip install pytest pytest-cov
+          command -v pytest >/dev/null 2>&1 || pip install pytest pytest-cov
           pytest ${{ inputs.pytest-args }} --cov --cov-report=xml --cov-report=term-missing -v
 
       # ── Coverage ──────────────────────────────────────────────────────
