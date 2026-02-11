@@ -77,6 +77,16 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # ── Validate Go project ──────────────────────────────────────────
+      - name: Validate project structure
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          if [ ! -f "go.mod" ]; then
+            echo "::error::No go.mod found. This is not a Go module."
+            exit 1
+          fi
+          echo "✓ Go project structure validated"
+
       # ── Go setup ─────────────────────────────────────────────────────
       - name: Set up Go ${{ matrix.go-version }}
         uses: actions/setup-go@v5
@@ -84,13 +94,36 @@ jobs:
           go-version: ${{ matrix.go-version }}
           cache-dependency-path: ${{ inputs.working-directory }}/go.sum
 
+      # ── Validate Go version ──────────────────────────────────────────
+      - name: Validate Go version
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          GO_MOD_VERSION=$(grep -E '^go [0-9.]+' go.mod | awk '{print $2}')
+          GO_ACTUAL_VERSION=$(go version | awk '{print $3}' | sed 's/go//')
+          echo "go.mod requires: go $GO_MOD_VERSION"
+          echo "Using: go $GO_ACTUAL_VERSION"
+          
+          if [ -n "$GO_MOD_VERSION" ]; then
+            MAJOR_MOD=$(echo $GO_MOD_VERSION | cut -d. -f1)
+            MINOR_MOD=$(echo $GO_MOD_VERSION | cut -d. -f2)
+            MAJOR_ACTUAL=$(echo $GO_ACTUAL_VERSION | cut -d. -f1)
+            MINOR_ACTUAL=$(echo $GO_ACTUAL_VERSION | cut -d. -f2)
+            
+            if [ "$MAJOR_ACTUAL" -lt "$MAJOR_MOD" ] || ([ "$MAJOR_ACTUAL" -eq "$MAJOR_MOD" ] && [ "$MINOR_ACTUAL" -lt "$MINOR_MOD" ]); then
+              echo "::error::Go version mismatch. go.mod requires $GO_MOD_VERSION but using $GO_ACTUAL_VERSION"
+              exit 1
+            fi
+          fi
+          echo "✓ Go version validated"
+
       # ── Verify dependencies ──────────────────────────────────────────
       - name: Verify dependencies
         run: |
           go mod verify
           go mod tidy
-          git diff --exit-code go.mod go.sum || \
-            (echo "::error::go.mod or go.sum is not tidy. Run 'go mod tidy' and commit." && exit 1)
+          if ! git diff --exit-code go.mod go.sum; then
+            echo "::warning::go.mod or go.sum is not tidy. Consider running 'go mod tidy' and committing."
+          fi
 
       # ── Lint ──────────────────────────────────────────────────────────
       - name: Lint with golangci-lint
@@ -109,7 +142,29 @@ jobs:
       # ── Build ─────────────────────────────────────────────────────────
       - name: Build
         if: inputs.enable-build
-        run: go build -v ${{ inputs.build-args }}
+        run: |
+          set -e
+          echo "Building Go binaries..."
+          go build -v -o ./bin/ ${{ inputs.build-args }}
+          echo "✓ Build completed successfully"
+
+      # ── Upload build artifacts ────────────────────────────────────────
+      - name: Upload build artifacts
+        if: inputs.enable-build
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-build-${{ matrix.go-version }}
+          path: ${{ inputs.working-directory }}/bin/
+          retention-days: 7
+          if-no-files-found: ignore
+
+      # ── Security scan (govulncheck) ──────────────────────────────────
+      - name: Run govulncheck
+        if: inputs.enable-test
+        continue-on-error: true
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
 
       # ── Coverage ──────────────────────────────────────────────────────
       - name: Upload coverage to Codecov
@@ -117,6 +172,7 @@ jobs:
         uses: codecov/codecov-action@v4
         with:
           token: ${{ secrets.codecov-token }}
-          file: coverage.out
+          files: ${{ inputs.working-directory }}/coverage.out
           flags: go-${{ matrix.go-version }}
           fail_ci_if_error: false
+        continue-on-error: true

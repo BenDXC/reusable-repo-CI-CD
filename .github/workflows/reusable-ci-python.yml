@@ -86,11 +86,21 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # ── Validate Python project ──────────────────────────────────────
+      - name: Validate project structure
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          if [ ! -f "setup.py" ] && [ ! -f "setup.cfg" ] && [ ! -f "pyproject.toml" ] && [ ! -f "${{ inputs.requirements-file }}" ]; then
+            echo "::error::No Python project configuration found (setup.py, pyproject.toml, or ${{ inputs.requirements-file }})"
+            exit 1
+          fi
+          echo "✓ Python project structure validated"
+
       # ── System dependencies ───────────────────────────────────────────
       - name: Install system dependencies
         if: inputs.extra-system-deps != ''
         run: |
-          sudo apt-get update
+          sudo apt-get update -qq
           sudo apt-get install -y ${{ inputs.extra-system-deps }}
 
       # ── Python setup ──────────────────────────────────────────────────
@@ -133,35 +143,61 @@ jobs:
       - name: Install dependencies (pip)
         if: inputs.package-manager == 'pip'
         run: |
-          python -m pip install --upgrade pip
+          set -e
+          python -m pip install --upgrade pip setuptools wheel
+          
+          # Install main dependencies
           if [ -f "${{ inputs.requirements-file }}" ]; then
+            echo "Installing from ${{ inputs.requirements-file }}..."
             pip install -r "${{ inputs.requirements-file }}"
           fi
+          
+          # Install dev dependencies
           if [ -f "requirements-dev.txt" ]; then
+            echo "Installing dev dependencies..."
             pip install -r requirements-dev.txt
           fi
+          
+          # Install package in editable mode if pyproject.toml exists
           if [ -f "pyproject.toml" ]; then
-            pip install -e ".[dev]" 2>/dev/null || pip install -e . 2>/dev/null || true
+            echo "Installing package in editable mode..."
+            if pip install -e ".[dev]"; then
+              echo "✓ Installed with dev extras"
+            elif pip install -e .; then
+              echo "✓ Installed without dev extras"
+            else
+              echo "::warning::Could not install package in editable mode"
+            fi
           fi
+          
+          echo "✓ Dependencies installed successfully"
 
       - name: Install dependencies (poetry)
         if: inputs.package-manager == 'poetry'
         run: |
+          set -e
           pip install poetry
           poetry config virtualenvs.in-project true
+          poetry config virtualenvs.create true
+          echo "Installing dependencies with Poetry..."
+          poetry install --no-interaction --no-ansi --no-root
           poetry install --no-interaction --no-ansi
+          echo "✓ Poetry dependencies installed successfully"
 
       - name: Install dependencies (pipenv)
         if: inputs.package-manager == 'pipenv'
         run: |
+          set -e
           pip install pipenv
+          echo "Installing dependencies with Pipenv..."
           pipenv install --dev --deploy
+          echo "✓ Pipenv dependencies installed successfully"
 
       # ── Lint ──────────────────────────────────────────────────────────
       - name: Lint with ruff
         if: inputs.enable-lint
         run: |
-          pip install ruff
+          command -v ruff >/dev/null 2>&1 || pip install ruff
           ruff check ${{ inputs.ruff-args }} .
           ruff format --check .
 
@@ -169,14 +205,14 @@ jobs:
       - name: Type check with mypy
         if: inputs.enable-type-check
         run: |
-          pip install mypy
+          command -v mypy >/dev/null 2>&1 || pip install mypy
           mypy .
 
       # ── Test ──────────────────────────────────────────────────────────
       - name: Run tests with pytest
         if: inputs.enable-test
         run: |
-          pip install pytest pytest-cov
+          command -v pytest >/dev/null 2>&1 || pip install pytest pytest-cov
           pytest ${{ inputs.pytest-args }} --cov --cov-report=xml --cov-report=term-missing -v
 
       # ── Coverage ──────────────────────────────────────────────────────
@@ -185,6 +221,19 @@ jobs:
         uses: codecov/codecov-action@v4
         with:
           token: ${{ secrets.codecov-token }}
-          file: ./coverage.xml
+          files: ${{ inputs.working-directory }}/coverage.xml
           flags: python-${{ matrix.python-version }}
           fail_ci_if_error: false
+          verbose: true
+        continue-on-error: true
+        
+      - name: Upload coverage artifacts
+        if: inputs.enable-coverage && inputs.enable-test && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-python-${{ matrix.python-version }}
+          path: |
+            ${{ inputs.working-directory }}/coverage.xml
+            ${{ inputs.working-directory }}/htmlcov/
+          retention-days: 7
+          if-no-files-found: ignore

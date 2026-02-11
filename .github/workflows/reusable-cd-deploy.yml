@@ -146,6 +146,22 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # ── Pre-deployment validation ────────────────────────────────────
+      - name: Validate deployment inputs
+        run: |
+          echo "Validating deployment configuration..."
+          echo "Provider: ${{ inputs.provider }}"
+          echo "Target: ${{ inputs.target }}"
+          echo "Image: ${{ inputs.image }}"
+          echo "Environment: ${{ inputs.environment }}"
+          
+          if [ -z "${{ inputs.image }}" ]; then
+            echo "::error::Image reference is required"
+            exit 1
+          fi
+          
+          echo "✓ Deployment inputs validated"
+
       - name: Configure AWS credentials (OIDC)
         if: secrets.aws-role-to-assume != ''
         uses: aws-actions/configure-aws-credentials@v4
@@ -205,6 +221,9 @@ jobs:
           echo "| **Region** | ${{ inputs.aws-region }} |" >> "$GITHUB_STEP_SUMMARY"
           echo "| **Image** | \`${{ inputs.image }}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| **Environment** | ${{ inputs.environment }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Deployed by** | ${{ github.actor }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Commit** | \`${{ github.sha }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Workflow Run** | [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |" >> "$GITHUB_STEP_SUMMARY"
 
   # ════════════════════════════════════════════════════════════════════════
   # GCP Deployment
@@ -255,6 +274,8 @@ jobs:
           echo "| **Region** | ${{ inputs.gcp-region }} |" >> "$GITHUB_STEP_SUMMARY"
           echo "| **Image** | \`${{ inputs.image }}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| **Environment** | ${{ inputs.environment }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Deployed by** | ${{ github.actor }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Commit** | \`${{ github.sha }}\` |" >> "$GITHUB_STEP_SUMMARY"
 
   # ════════════════════════════════════════════════════════════════════════
   # Azure Deployment
@@ -308,3 +329,5 @@ jobs:
           echo "| **Target** | ${{ inputs.target }} |" >> "$GITHUB_STEP_SUMMARY"
           echo "| **Image** | \`${{ inputs.image }}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| **Environment** | ${{ inputs.environment }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Deployed by** | ${{ github.actor }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Commit** | \`${{ github.sha }}\` |" >> "$GITHUB_STEP_SUMMARY"

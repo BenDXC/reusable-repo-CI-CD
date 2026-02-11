@@ -77,6 +77,16 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # ── Validate Rust project ────────────────────────────────────────
+      - name: Validate project structure
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          if [ ! -f "Cargo.toml" ]; then
+            echo "::error::No Cargo.toml found. This is not a Rust project."
+            exit 1
+          fi
+          echo "✓ Rust project structure validated"
+
       # ── Rust toolchain setup ─────────────────────────────────────────
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
@@ -108,10 +118,23 @@ jobs:
         if: inputs.enable-clippy
         run: cargo clippy --all-targets --all-features ${{ inputs.clippy-args }}
 
+      # ── Security audit ───────────────────────────────────────────────
+      - name: Install cargo-audit
+        if: inputs.enable-test
+        run: cargo install cargo-audit --locked
+
+      - name: Run cargo-audit
+        if: inputs.enable-test
+        continue-on-error: true
+        run: cargo audit
+
       # ── Test ──────────────────────────────────────────────────────────
       - name: Run tests
         if: inputs.enable-test
-        run: cargo test --all-features ${{ inputs.test-args }}
+        run: |
+          set -e
+          cargo test --all-features ${{ inputs.test-args }}
+          echo "✓ Tests passed successfully"
 
       # ── Build ─────────────────────────────────────────────────────────
       - name: Build (release)

@@ -74,6 +74,23 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # ── Validate Java project ────────────────────────────────────────
+      - name: Validate project structure
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          if [ "${{ inputs.build-tool }}" = "maven" ]; then
+            if [ ! -f "pom.xml" ]; then
+              echo "::error::No pom.xml found for Maven project"
+              exit 1
+            fi
+          elif [ "${{ inputs.build-tool }}" = "gradle" ]; then
+            if [ ! -f "build.gradle" ] && [ ! -f "build.gradle.kts" ]; then
+              echo "::error::No build.gradle or build.gradle.kts found for Gradle project"
+              exit 1
+            fi
+          fi
+          echo "✓ Java project structure validated"
+
       # ── Java setup ───────────────────────────────────────────────────
       - name: Set up JDK ${{ matrix.java-version }}
         uses: actions/setup-java@v4
@@ -87,27 +104,55 @@ jobs:
         if: inputs.build-tool == 'gradle'
         uses: gradle/actions/wrapper-validation@v4
 
-      # ── Build & Test (Maven) ─────────────────────────────────────────
-      - name: Build with Maven
+      # ── Compile (Maven) ──────────────────────────────────────────────
+      - name: Compile with Maven
         if: inputs.build-tool == 'maven'
         run: |
           chmod +x mvnw 2>/dev/null || true
+          if [ -f "mvnw" ]; then
+            echo "Compiling with Maven wrapper..."
+            ./mvnw -B compile -DskipTests ${{ inputs.maven-args }}
+          else
+            echo "Compiling with Maven..."
+            mvn -B compile -DskipTests ${{ inputs.maven-args }}
+          fi
+          echo "✓ Compilation successful"
+
+      # ── Build & Test (Maven) ─────────────────────────────────────────
+      - name: Test with Maven
+        if: inputs.build-tool == 'maven' && inputs.enable-test
+        run: |
           if [ -f "mvnw" ]; then
             ./mvnw -B verify ${{ inputs.maven-args }}
           else
             mvn -B verify ${{ inputs.maven-args }}
           fi
+          echo "✓ Tests passed successfully"
 
-      # ── Build & Test (Gradle) ────────────────────────────────────────
-      - name: Build with Gradle
+      # ── Compile (Gradle) ─────────────────────────────────────────────
+      - name: Compile with Gradle
         if: inputs.build-tool == 'gradle'
         run: |
           chmod +x gradlew 2>/dev/null || true
+          if [ -f "gradlew" ]; then
+            echo "Compiling with Gradle wrapper..."
+            ./gradlew compileJava compileTestJava ${{ inputs.gradle-args }}
+          else
+            echo "Compiling with Gradle..."
+            gradle compileJava compileTestJava ${{ inputs.gradle-args }}
+          fi
+          echo "✓ Compilation successful"
+
+      # ── Build & Test (Gradle) ────────────────────────────────────────
+      - name: Test with Gradle
+        if: inputs.build-tool == 'gradle' && inputs.enable-test
+        run: |
           if [ -f "gradlew" ]; then
             ./gradlew build ${{ inputs.gradle-args }}
           else
             gradle build ${{ inputs.gradle-args }}
           fi
+          echo "✓ Tests passed successfully"
 
       # ── Test reports ─────────────────────────────────────────────────
       - name: Upload test results
