@@ -112,7 +112,7 @@ jobs:
       # ── Test reports ─────────────────────────────────────────────────
       - name: Upload test results
         if: always() && inputs.enable-test
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: test-results-java-${{ matrix.java-version }}
           path: |

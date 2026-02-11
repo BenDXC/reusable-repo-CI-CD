@@ -121,7 +121,7 @@ jobs:
       # ── Test results ─────────────────────────────────────────────────
       - name: Upload test results
         if: always() && inputs.enable-test
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: test-results-dotnet-${{ matrix.dotnet-version }}
           path: ${{ inputs.working-directory }}/test-results/
