@@ -85,7 +85,7 @@ jobs:
       # ── Gradle wrapper validation ────────────────────────────────────
       - name: Validate Gradle wrapper
         if: inputs.build-tool == 'gradle'
-        uses: gradle/actions/wrapper-validation@v4
+        uses: gradle/actions/wrapper-validation@v5
 
       # ── Build & Test (Maven) ─────────────────────────────────────────
       - name: Build with Maven
