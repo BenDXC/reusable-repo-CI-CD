@@ -1,0 +1,62 @@
+# ============================================================================
+# Example: Java Project CI/CD Pipeline (Maven)
+# ============================================================================
+# Copy this file to your project's .github/workflows/ directory and adjust
+# the 'uses' path to point to your fork/copy of the reusable workflows repo.
+# ============================================================================
+
+name: "Java CI/CD"
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── PR Checks ────────────────────────────────────────────────────────
+  pr-checks:
+    if: github.event_name == 'pull_request'
+    uses: <owner>/<repo>/.github/workflows/reusable-pr-checks.yml@main
+
+  # ── CI ───────────────────────────────────────────────────────────────
+  ci:
+    uses: <owner>/<repo>/.github/workflows/reusable-ci-java.yml@main
+    with:
+      java-versions: '["17", "21"]'
+      distribution: "temurin"
+      build-tool: "maven"
+      enable-coverage: true
+    secrets:
+      codecov-token: ${{ secrets.CODECOV_TOKEN }}
+
+  # ── Security ─────────────────────────────────────────────────────────
+  security:
+    uses: <owner>/<repo>/.github/workflows/reusable-security-scan.yml@main
+    with:
+      enable-codeql: true
+      languages: '["java"]'
+      enable-dependency-review: true
+
+  # ── Docker ───────────────────────────────────────────────────────────
+  docker:
+    needs: [ci]
+    if: github.ref == 'refs/heads/main'
+    uses: <owner>/<repo>/.github/workflows/reusable-cd-docker.yml@main
+    with:
+      registry: "ghcr"
+      push: true
+      build-args: |
+        JAR_FILE=target/*.jar
+
+  # ── Release ──────────────────────────────────────────────────────────
+  release:
+    needs: [docker]
+    if: github.ref == 'refs/heads/main'
+    uses: <owner>/<repo>/.github/workflows/reusable-release.yml@main
+    with:
+      release-type: "auto"

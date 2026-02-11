@@ -1,0 +1,78 @@
+# ============================================================================
+# Example: Go Project CI/CD Pipeline
+# ============================================================================
+# Copy this file to your project's .github/workflows/ directory and adjust
+# the 'uses' path to point to your fork/copy of the reusable workflows repo.
+# ============================================================================
+
+name: "Go CI/CD"
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── PR Checks ────────────────────────────────────────────────────────
+  pr-checks:
+    if: github.event_name == 'pull_request'
+    uses: <owner>/<repo>/.github/workflows/reusable-pr-checks.yml@main
+
+  # ── CI ───────────────────────────────────────────────────────────────
+  ci:
+    uses: <owner>/<repo>/.github/workflows/reusable-ci-go.yml@main
+    with:
+      go-versions: '["1.22", "1.23"]'
+      enable-lint: true
+      enable-test: true
+      enable-build: true
+      enable-coverage: true
+    secrets:
+      codecov-token: ${{ secrets.CODECOV_TOKEN }}
+
+  # ── Security ─────────────────────────────────────────────────────────
+  security:
+    uses: <owner>/<repo>/.github/workflows/reusable-security-scan.yml@main
+    with:
+      enable-codeql: true
+      languages: '["go"]'
+      enable-dependency-review: true
+
+  # ── Docker ───────────────────────────────────────────────────────────
+  docker:
+    needs: [ci]
+    if: github.ref == 'refs/heads/main'
+    uses: <owner>/<repo>/.github/workflows/reusable-cd-docker.yml@main
+    with:
+      registry: "ghcr"
+      push: true
+      platforms: "linux/amd64,linux/arm64"
+
+  # ── Deploy to AWS ECS ───────────────────────────────────────────────
+  deploy:
+    needs: [docker]
+    uses: <owner>/<repo>/.github/workflows/reusable-cd-deploy.yml@main
+    with:
+      provider: "aws"
+      target: "ecs"
+      image: ${{ needs.docker.outputs.image-tags }}
+      environment: "production"
+      aws-region: "us-east-1"
+      ecs-cluster: "go-app-cluster"
+      ecs-service: "go-app-service"
+      ecs-task-definition: ".aws/task-definition.json"
+    secrets:
+      aws-role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+
+  # ── Release ──────────────────────────────────────────────────────────
+  release:
+    needs: [docker]
+    if: github.ref == 'refs/heads/main'
+    uses: <owner>/<repo>/.github/workflows/reusable-release.yml@main
+    with:
+      release-type: "auto"

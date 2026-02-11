@@ -1,0 +1,130 @@
+# ============================================================================
+# Example: Full-Stack Project CI/CD Pipeline
+# ============================================================================
+# Demonstrates a monorepo with a Python backend and Node.js frontend,
+# both containerized and deployed. Shows how to compose multiple reusable
+# workflows together.
+# ============================================================================
+
+name: "Full-Stack CI/CD"
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── PR Quality Gates ─────────────────────────────────────────────────
+  pr-checks:
+    if: github.event_name == 'pull_request'
+    uses: <owner>/<repo>/.github/workflows/reusable-pr-checks.yml@main
+    with:
+      max-files-changed: 80
+      max-lines-changed: 2000
+
+  # ── Backend CI (Python) ──────────────────────────────────────────────
+  backend-ci:
+    uses: <owner>/<repo>/.github/workflows/reusable-ci-python.yml@main
+    with:
+      python-versions: '["3.12", "3.13"]'
+      package-manager: "poetry"
+      working-directory: "backend"
+      enable-lint: true
+      enable-type-check: true
+      enable-test: true
+      enable-coverage: true
+    secrets:
+      codecov-token: ${{ secrets.CODECOV_TOKEN }}
+
+  # ── Frontend CI (Node.js) ───────────────────────────────────────────
+  frontend-ci:
+    uses: <owner>/<repo>/.github/workflows/reusable-ci-node.yml@main
+    with:
+      node-versions: '["20", "22"]'
+      package-manager: "pnpm"
+      working-directory: "frontend"
+      enable-lint: true
+      enable-test: true
+      enable-build: true
+      enable-coverage: true
+    secrets:
+      codecov-token: ${{ secrets.CODECOV_TOKEN }}
+
+  # ── Security Scanning ───────────────────────────────────────────────
+  security:
+    uses: <owner>/<repo>/.github/workflows/reusable-security-scan.yml@main
+    with:
+      enable-codeql: true
+      languages: '["python", "javascript"]'
+      enable-dependency-review: true
+      enable-trivy: true
+      trivy-scan-type: "fs"
+
+  # ── Backend Docker ───────────────────────────────────────────────────
+  backend-docker:
+    needs: [backend-ci]
+    if: github.ref == 'refs/heads/main'
+    uses: <owner>/<repo>/.github/workflows/reusable-cd-docker.yml@main
+    with:
+      registry: "ghcr"
+      image-name: "${{ github.repository }}/backend"
+      context: "./backend"
+      dockerfile: "./backend/Dockerfile"
+      push: true
+
+  # ── Frontend Docker ──────────────────────────────────────────────────
+  frontend-docker:
+    needs: [frontend-ci]
+    if: github.ref == 'refs/heads/main'
+    uses: <owner>/<repo>/.github/workflows/reusable-cd-docker.yml@main
+    with:
+      registry: "ghcr"
+      image-name: "${{ github.repository }}/frontend"
+      context: "./frontend"
+      dockerfile: "./frontend/Dockerfile"
+      push: true
+
+  # ── Deploy Backend ───────────────────────────────────────────────────
+  deploy-backend:
+    needs: [backend-docker]
+    uses: <owner>/<repo>/.github/workflows/reusable-cd-deploy.yml@main
+    with:
+      provider: "gcp"
+      target: "cloud-run"
+      image: ${{ needs.backend-docker.outputs.image-tags }}
+      environment: "production"
+      gcp-project-id: "my-project"
+      gcp-region: "us-central1"
+      cloud-run-service: "backend-api"
+    secrets:
+      gcp-workload-identity-provider: ${{ secrets.GCP_WIF_PROVIDER }}
+      gcp-service-account: ${{ secrets.GCP_SA_EMAIL }}
+
+  # ── Deploy Frontend ──────────────────────────────────────────────────
+  deploy-frontend:
+    needs: [frontend-docker]
+    uses: <owner>/<repo>/.github/workflows/reusable-cd-deploy.yml@main
+    with:
+      provider: "gcp"
+      target: "cloud-run"
+      image: ${{ needs.frontend-docker.outputs.image-tags }}
+      environment: "production"
+      gcp-project-id: "my-project"
+      gcp-region: "us-central1"
+      cloud-run-service: "frontend-app"
+    secrets:
+      gcp-workload-identity-provider: ${{ secrets.GCP_WIF_PROVIDER }}
+      gcp-service-account: ${{ secrets.GCP_SA_EMAIL }}
+
+  # ── Release ──────────────────────────────────────────────────────────
+  release:
+    needs: [deploy-backend, deploy-frontend]
+    if: github.ref == 'refs/heads/main'
+    uses: <owner>/<repo>/.github/workflows/reusable-release.yml@main
+    with:
+      release-type: "auto"

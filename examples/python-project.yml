@@ -1,0 +1,81 @@
+# ============================================================================
+# Example: Python Project CI/CD Pipeline
+# ============================================================================
+# Copy this file to your project's .github/workflows/ directory and adjust
+# the 'uses' path to point to your fork/copy of the reusable workflows repo.
+# ============================================================================
+
+name: "Python CI/CD"
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── PR Quality Checks ────────────────────────────────────────────────
+  pr-checks:
+    if: github.event_name == 'pull_request'
+    uses: <owner>/<repo>/.github/workflows/reusable-pr-checks.yml@main
+
+  # ── CI: Lint, Type Check, Test ───────────────────────────────────────
+  ci:
+    uses: <owner>/<repo>/.github/workflows/reusable-ci-python.yml@main
+    with:
+      python-versions: '["3.11", "3.12", "3.13"]'
+      package-manager: "pip"
+      enable-lint: true
+      enable-type-check: true
+      enable-test: true
+      enable-coverage: true
+      pytest-args: "--timeout=300"
+    secrets:
+      codecov-token: ${{ secrets.CODECOV_TOKEN }}
+
+  # ── Security Scanning ───────────────────────────────────────────────
+  security:
+    uses: <owner>/<repo>/.github/workflows/reusable-security-scan.yml@main
+    with:
+      enable-codeql: true
+      languages: '["python"]'
+      enable-dependency-review: true
+
+  # ── Docker Build & Push ──────────────────────────────────────────────
+  docker:
+    needs: [ci]
+    if: github.ref == 'refs/heads/main'
+    uses: <owner>/<repo>/.github/workflows/reusable-cd-docker.yml@main
+    with:
+      registry: "ghcr"
+      push: true
+      platforms: "linux/amd64,linux/arm64"
+
+  # ── Deploy to Production ─────────────────────────────────────────────
+  deploy:
+    needs: [docker]
+    if: github.ref == 'refs/heads/main'
+    uses: <owner>/<repo>/.github/workflows/reusable-cd-deploy.yml@main
+    with:
+      provider: "aws"
+      target: "ecs"
+      image: ${{ needs.docker.outputs.image-tags }}
+      environment: "production"
+      aws-region: "us-east-1"
+      ecs-cluster: "my-cluster"
+      ecs-service: "my-service"
+      ecs-task-definition: ".aws/task-definition.json"
+    secrets:
+      aws-role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+
+  # ── Release ──────────────────────────────────────────────────────────
+  release:
+    needs: [deploy]
+    if: github.ref == 'refs/heads/main'
+    uses: <owner>/<repo>/.github/workflows/reusable-release.yml@main
+    with:
+      release-type: "auto"
