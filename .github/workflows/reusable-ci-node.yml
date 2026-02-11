@@ -93,7 +93,7 @@ jobs:
     steps:
       # ── Checkout ──────────────────────────────────────────────────────
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       # ── Validate Node.js project ─────────────────────────────────────
       - name: Validate project structure
@@ -108,13 +108,13 @@ jobs:
       # ── pnpm setup ───────────────────────────────────────────────────
       - name: Install pnpm
         if: inputs.package-manager == 'pnpm'
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v5
         with:
           version: ${{ inputs.pnpm-version }}
 
       # ── Node.js setup ────────────────────────────────────────────────
       - name: Set up Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: ${{ matrix.node-version }}
           cache: ${{ inputs.package-manager }}
@@ -200,7 +200,7 @@ jobs:
       # ── Coverage ──────────────────────────────────────────────────────
       - name: Upload coverage to Codecov
         if: inputs.enable-coverage && inputs.enable-test
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.codecov-token }}
           flags: node-${{ matrix.node-version }}
@@ -209,7 +209,7 @@ jobs:
       # ── Upload build artifacts ────────────────────────────────────────
       - name: Upload build artifacts
         if: inputs.enable-build
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: build-node-${{ matrix.node-version }}
           path: |

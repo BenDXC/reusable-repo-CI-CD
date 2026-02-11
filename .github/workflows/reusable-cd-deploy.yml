@@ -144,7 +144,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       # ── Pre-deployment validation ────────────────────────────────────
       - name: Validate deployment inputs
@@ -164,14 +164,14 @@ jobs:
 
       - name: Configure AWS credentials (OIDC)
         if: secrets.aws-role-to-assume != ''
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v5
         with:
           role-to-assume: ${{ secrets.aws-role-to-assume }}
           aws-region: ${{ inputs.aws-region }}
 
       - name: Configure AWS credentials (Access Keys)
         if: secrets.aws-role-to-assume == ''
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v5
         with:
           aws-access-key-id: ${{ secrets.aws-access-key-id }}
           aws-secret-access-key: ${{ secrets.aws-secret-access-key }}
@@ -186,7 +186,7 @@ jobs:
       - name: Render ECS task definition
         if: inputs.target == 'ecs'
         id: render-task-def
-        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        uses: aws-actions/amazon-ecs-render-task-definition@v2
         with:
           task-definition: ${{ inputs.ecs-task-definition }}
           container-name: ${{ inputs.ecs-container-name }}
@@ -194,7 +194,7 @@ jobs:
 
       - name: Deploy to ECS
         if: inputs.target == 'ecs'
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v3
         with:
           task-definition: ${{ steps.render-task-def.outputs.task-definition }}
           service: ${{ inputs.ecs-service }}
@@ -236,28 +236,28 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Authenticate to GCP (Workload Identity)
         if: secrets.gcp-workload-identity-provider != ''
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@v3
         with:
           workload_identity_provider: ${{ secrets.gcp-workload-identity-provider }}
           service_account: ${{ secrets.gcp-service-account }}
 
       - name: Authenticate to GCP (Service Account Key)
         if: secrets.gcp-workload-identity-provider == '' && secrets.gcp-credentials != ''
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@v3
         with:
           credentials_json: ${{ secrets.gcp-credentials }}
 
       - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2
+        uses: google-github-actions/setup-gcloud@v3
 
       # ── Cloud Run Deploy ─────────────────────────────────────────────
       - name: Deploy to Cloud Run
         if: inputs.target == 'cloud-run'
-        uses: google-github-actions/deploy-cloudrun@v2
+        uses: google-github-actions/deploy-cloudrun@v3
         with:
           service: ${{ inputs.cloud-run-service }}
           image: ${{ inputs.image }}
@@ -288,11 +288,11 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Azure login (OIDC)
         if: secrets.azure-client-id != ''
-        uses: azure/login@v2
+        uses: azure/login@v3
         with:
           client-id: ${{ secrets.azure-client-id }}
           tenant-id: ${{ secrets.azure-tenant-id }}
@@ -300,14 +300,14 @@ jobs:
 
       - name: Azure login (Service Principal)
         if: secrets.azure-client-id == '' && secrets.azure-credentials != ''
-        uses: azure/login@v2
+        uses: azure/login@v3
         with:
           creds: ${{ secrets.azure-credentials }}
 
       # ── Container Apps Deploy ────────────────────────────────────────
       - name: Deploy to Azure Container Apps
         if: inputs.target == 'container-apps'
-        uses: azure/container-apps-deploy-action@v1
+        uses: azure/container-apps-deploy-action@v2
         with:
           resourceGroup: ${{ inputs.azure-resource-group }}
           containerAppName: ${{ inputs.azure-container-app }}
@@ -316,7 +316,7 @@ jobs:
       # ── App Service Deploy ───────────────────────────────────────────
       - name: Deploy to Azure App Service
         if: inputs.target == 'app-service'
-        uses: azure/webapps-deploy@v3
+        uses: azure/webapps-deploy@v4
         with:
           app-name: ${{ inputs.azure-app-service }}
           images: ${{ inputs.image }}
