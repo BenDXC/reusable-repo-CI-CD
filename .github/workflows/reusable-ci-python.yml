@@ -84,7 +84,7 @@ jobs:
     steps:
       # ── Checkout ──────────────────────────────────────────────────────
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       # ── Validate Python project ──────────────────────────────────────
       - name: Validate project structure
@@ -105,14 +105,14 @@ jobs:
 
       # ── Python setup ──────────────────────────────────────────────────
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
 
       # ── Cache ─────────────────────────────────────────────────────────
       - name: Cache pip packages
         if: inputs.package-manager == 'pip'
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cache/pip
           key: pip-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('**/requirements*.txt', '**/setup.py', '**/setup.cfg', '**/pyproject.toml') }}
@@ -121,7 +121,7 @@ jobs:
 
       - name: Cache Poetry
         if: inputs.package-manager == 'poetry'
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cache/pypoetry
@@ -132,7 +132,7 @@ jobs:
 
       - name: Cache Pipenv
         if: inputs.package-manager == 'pipenv'
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.local/share/virtualenvs
           key: pipenv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('**/Pipfile.lock') }}
@@ -218,7 +218,7 @@ jobs:
       # ── Coverage ──────────────────────────────────────────────────────
       - name: Upload coverage to Codecov
         if: inputs.enable-coverage && inputs.enable-test
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.codecov-token }}
           files: ${{ inputs.working-directory }}/coverage.xml
@@ -229,7 +229,7 @@ jobs:
         
       - name: Upload coverage artifacts
         if: inputs.enable-coverage && inputs.enable-test && always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: coverage-python-${{ matrix.python-version }}
           path: |
