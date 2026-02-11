@@ -16,11 +16,9 @@ A production-ready collection of reusable GitHub Actions workflows that cover th
   - [Shared Workflows](#shared-workflows)
 - [Examples](#examples)
 - [Composite Actions](#composite-actions)
-- [Repository Configuration](#repository-configuration)
 - [Secrets Reference](#secrets-reference)
 - [Customization Guide](#customization-guide)
 - [Action Versions](#action-versions)
-- [Contributing](#contributing)
 - [License](#license)
 
 ---
@@ -120,7 +118,6 @@ Your project now has CI/CD with linting, testing, Docker builds, and more.
 ├── actions/
 │   └── setup-and-cache/
 │       └── action.yml                  # Composite action for setup
-├── dependabot.yml                      # Dependency update config
 ├── CODEOWNERS                          # Code ownership
 ├── PULL_REQUEST_TEMPLATE.md            # PR template
 └── ISSUE_TEMPLATE/
@@ -392,20 +389,6 @@ steps:
 
 ---
 
-## Repository Configuration
-
-This repo includes several configuration files you can adapt:
-
-| File | Purpose |
-|------|---------|
-| `.github/dependabot.yml` | Automated dependency updates (GitHub Actions + all ecosystems) |
-| `.github/CODEOWNERS` | Automatic review assignment |
-| `.github/PULL_REQUEST_TEMPLATE.md` | Standardized PR descriptions |
-| `.github/ISSUE_TEMPLATE/bug_report.yml` | Structured bug reports |
-| `.github/ISSUE_TEMPLATE/feature_request.yml` | Structured feature requests |
-
----
-
 ## Secrets Reference
 
 Configure these in your repository or organization settings (**Settings > Secrets and variables > Actions**):
@@ -513,16 +496,6 @@ All workflows use the latest stable versions of GitHub Actions (as of 2025):
 | `azure/container-apps-deploy-action` | v1 | Azure Container Apps |
 | `azure/webapps-deploy` | v3 | Azure App Service |
 | `aquasecurity/trivy-action` | 0.28.0 | Trivy vulnerability scanner |
-
----
-
-## Contributing
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feat/amazing-feature`)
-3. Commit your changes using [conventional commits](https://www.conventionalcommits.org/)
-4. Push to the branch (`git push origin feat/amazing-feature`)
-5. Open a Pull Request
 
 ---
 
