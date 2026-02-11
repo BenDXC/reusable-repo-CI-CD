@@ -197,6 +197,38 @@ jobs:
           cache-from: ${{ inputs.enable-cache && 'type=gha' || '' }}
           cache-to: ${{ inputs.enable-cache && 'type=gha,mode=max' || '' }}
 
+      # ── Scan image ───────────────────────────────────────────────────
+      - name: Scan image with Trivy
+        if: inputs.push
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ steps.image.outputs.name }}@${{ steps.build.outputs.digest }}
+          format: sarif
+          output: trivy-results.sarif
+          severity: CRITICAL,HIGH
+        continue-on-error: true
+
+      - name: Upload Trivy results
+        if: inputs.push
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif
+        continue-on-error: true
+
+      # ── Inspect image ────────────────────────────────────────────────
+      - name: Inspect image
+        if: inputs.push
+        run: |
+          # Pull the image to inspect it
+          PLATFORM=$(echo "${{ inputs.platforms }}" | cut -d',' -f1)
+          docker pull --platform $PLATFORM ${{ steps.image.outputs.name }}@${{ steps.build.outputs.digest }}
+          
+          # Get image size
+          SIZE=$(docker inspect ${{ steps.image.outputs.name }}@${{ steps.build.outputs.digest }} | jq -r '.[0].Size')
+          SIZE_MB=$(echo "scale=2; $SIZE / 1024 / 1024" | bc)
+          
+          echo "IMAGE_SIZE_MB=$SIZE_MB" >> "$GITHUB_ENV"
+
       # ── Summary ──────────────────────────────────────────────────────
       - name: Output image info
         run: |
@@ -207,3 +239,13 @@ jobs:
           echo "| **Digest** | \`${{ steps.build.outputs.digest }}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| **Tags** | ${{ steps.meta.outputs.tags }} |" >> "$GITHUB_STEP_SUMMARY"
           echo "| **Platforms** | ${{ inputs.platforms }} |" >> "$GITHUB_STEP_SUMMARY"
+          
+          if [ -n "${{ env.IMAGE_SIZE_MB }}" ]; then
+            echo "| **Size** | ${{ env.IMAGE_SIZE_MB }} MB |" >> "$GITHUB_STEP_SUMMARY"
+            
+            # Warning for large images
+            if (( $(echo "${{ env.IMAGE_SIZE_MB }} > 500" | bc -l) )); then
+              echo "" >> "$GITHUB_STEP_SUMMARY"
+              echo "⚠️ **Warning:** Image is larger than 500MB. Consider optimizing with multi-stage builds." >> "$GITHUB_STEP_SUMMARY"
+            fi
+          fi

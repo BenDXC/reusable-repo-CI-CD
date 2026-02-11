@@ -54,6 +54,22 @@ jobs:
       # ── Checkout ──────────────────────────────────────────────────────
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # ── WIP/Draft detection ──────────────────────────────────────────
+      - name: Check for WIP/Draft markers
+        run: |
+          PR_TITLE="${{ github.event.pull_request.title }}"
+          IS_DRAFT="${{ github.event.pull_request.draft }}"
+          
+          if [ "$IS_DRAFT" = "true" ]; then
+            echo "::notice::This is a draft PR"
+          fi
+          
+          if echo "$PR_TITLE" | grep -qiE "^(\[?WIP\]?|DO NOT MERGE|DNM)"; then
+            echo "::warning::PR title contains WIP or DNM marker"
+          fi
 
       # ── PR title validation ──────────────────────────────────────────
       - name: Validate PR title (Conventional Commits)
@@ -80,6 +96,43 @@ jobs:
           fi
 
           echo "PR title is valid: $PR_TITLE"
+
+      # ── Type-based labeling ──────────────────────────────────────────
+      - name: Add type-based labels
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prTitle = context.payload.pull_request.title;
+            const typeMap = {
+              'feat': 'enhancement',
+              'fix': 'bug',
+              'docs': 'documentation',
+              'perf': 'performance',
+              'refactor': 'refactoring',
+              'test': 'testing',
+              'ci': 'ci-cd',
+              'chore': 'maintenance'
+            };
+            
+            const match = prTitle.match(/^(\w+)(\(.+\))?:/);
+            if (match) {
+              const type = match[1];
+              const label = typeMap[type];
+              
+              if (label) {
+                try {
+                  await github.rest.issues.addLabels({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: context.issue.number,
+                    labels: [label]
+                  });
+                  console.log(`Added label: ${label}`);
+                } catch (e) {
+                  console.log(`Could not add label ${label}: ${e.message}`);
+                }
+              }
+            }
 
       # ── PR size labels ───────────────────────────────────────────────
       - name: Add size labels

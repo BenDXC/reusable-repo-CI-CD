@@ -167,17 +167,17 @@ jobs:
             fi
 
             # Features
-            FEATURES=$(git log "${LATEST}..HEAD" --pretty=format:"- %s (%h)" --grep="^feat" --extended-regexp 2>/dev/null || true)
+            FEATURES=$(git log "${LATEST}..HEAD" --pretty=format:"- %s (%h) by @%an" --grep="^feat" --extended-regexp 2>/dev/null || true)
             if [ -n "$FEATURES" ]; then
-              echo "### Features"
+              echo "### ✨ Features"
               echo "$FEATURES"
               echo ""
             fi
 
             # Bug fixes
-            FIXES=$(git log "${LATEST}..HEAD" --pretty=format:"- %s (%h)" --grep="^fix" --extended-regexp 2>/dev/null || true)
+            FIXES=$(git log "${LATEST}..HEAD" --pretty=format:"- %s (%h) by @%an" --grep="^fix" --extended-regexp 2>/dev/null || true)
             if [ -n "$FIXES" ]; then
-              echo "### Bug Fixes"
+              echo "### 🐛 Bug Fixes"
               echo "$FIXES"
               echo ""
             fi
@@ -195,16 +195,37 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       # ── Create tag ───────────────────────────────────────────────────
+      - name: Check if tag exists
+        id: check-tag
+        run: |
+          if git rev-parse "${{ steps.version.outputs.tag }}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::Tag ${{ steps.version.outputs.tag }} already exists"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Create and push tag
+        if: steps.check-tag.outputs.exists == 'false'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git tag -a "${{ steps.version.outputs.tag }}" -m "Release ${{ steps.version.outputs.tag }}"
           git push origin "${{ steps.version.outputs.tag }}"
+          echo "✓ Tag created and pushed successfully"
+
+      # ── Validate release ─────────────────────────────────────────────
+      - name: Validate release data
+        run: |
+          if [ -z "${{ steps.changelog.outputs.body }}" ]; then
+            echo "::warning::Release notes are empty"
+          fi
+          echo "✓ Release validation complete"
 
       # ── Create GitHub Release ────────────────────────────────────────
       - name: Create GitHub Release
         id: create-release
+        if: steps.check-tag.outputs.exists == 'false'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
@@ -216,6 +237,7 @@ jobs:
           files: |
             ./release-assets/**
             ${{ inputs.artifact-path }}
+          make_latest: true
 
       # ── Summary ──────────────────────────────────────────────────────
       - name: Release summary

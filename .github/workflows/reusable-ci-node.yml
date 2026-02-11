@@ -95,6 +95,16 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # ── Validate Node.js project ─────────────────────────────────────
+      - name: Validate project structure
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          if [ ! -f "package.json" ]; then
+            echo "::error::No package.json found"
+            exit 1
+          fi
+          echo "✓ Node.js project structure validated"
+
       # ── pnpm setup ───────────────────────────────────────────────────
       - name: Install pnpm
         if: inputs.package-manager == 'pnpm'
@@ -111,24 +121,61 @@ jobs:
           cache-dependency-path: ${{ inputs.working-directory }}/
           registry-url: "https://registry.npmjs.org"
 
+      # ── Validate lockfile ────────────────────────────────────────────
+      - name: Validate lockfile (npm)
+        if: inputs.package-manager == 'npm'
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          if [ -f "package-lock.json" ]; then
+            npm install --package-lock-only --dry-run
+            echo "✓ package-lock.json is valid"
+          else
+            echo "::warning::No package-lock.json found. Consider committing lockfile for reproducible builds."
+          fi
+
       # ── Install dependencies ──────────────────────────────────────────
       - name: Install dependencies (npm)
         if: inputs.package-manager == 'npm'
-        run: npm ci
+        run: |
+          set -e
+          npm ci
+          echo "✓ Dependencies installed successfully"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.npm-token }}
 
       - name: Install dependencies (yarn)
         if: inputs.package-manager == 'yarn'
-        run: yarn install --frozen-lockfile
+        run: |
+          set -e
+          yarn install --frozen-lockfile
+          echo "✓ Dependencies installed successfully"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.npm-token }}
 
       - name: Install dependencies (pnpm)
         if: inputs.package-manager == 'pnpm'
-        run: pnpm install --frozen-lockfile
+        run: |
+          set -e
+          pnpm install --frozen-lockfile
+          echo "✓ Dependencies installed successfully"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.npm-token }}
+
+      # ── Security audit ───────────────────────────────────────────────
+      - name: Security audit (npm)
+        if: inputs.package-manager == 'npm'
+        continue-on-error: true
+        run: npm audit --audit-level=moderate
+
+      - name: Security audit (yarn)
+        if: inputs.package-manager == 'yarn'
+        continue-on-error: true
+        run: yarn audit --level moderate
+
+      - name: Security audit (pnpm)
+        if: inputs.package-manager == 'pnpm'
+        continue-on-error: true
+        run: pnpm audit --audit-level moderate
 
       # ── Lint ──────────────────────────────────────────────────────────
       - name: Lint

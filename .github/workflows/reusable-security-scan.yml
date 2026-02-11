@@ -36,7 +36,7 @@ on:
       enable-trivy:
         description: "Run Trivy vulnerability scanner"
         type: boolean
-        default: false
+        default: true
       trivy-scan-type:
         description: "Trivy scan type: fs | image | repo"
         type: string
@@ -151,6 +151,26 @@ jobs:
         if: always()
         with:
           sarif_file: trivy-results.sarif
+
+  # ════════════════════════════════════════════════════════════════════════
+  # Secret Scanning
+  # ════════════════════════════════════════════════════════════════════════
+  secret-scan:
+    name: "Secret Scanning"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+        continue-on-error: true
 
   # ════════════════════════════════════════════════════════════════════════
   # OSV Scanner
