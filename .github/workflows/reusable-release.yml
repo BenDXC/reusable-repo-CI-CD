@@ -1,0 +1,230 @@
+# ============================================================================
+# Reusable Workflow — Release & Tagging
+# ============================================================================
+# Automates semantic versioning, changelog generation, and GitHub Release
+# creation. Supports conventional commits, auto-generated release notes,
+# and asset uploads.
+#
+# Usage (caller workflow):
+#   jobs:
+#     release:
+#       uses: <owner>/<repo>/.github/workflows/reusable-release.yml@main
+#       with:
+#         release-type: "auto"
+# ============================================================================
+
+name: "Release"
+
+on:
+  workflow_call:
+    inputs:
+      release-type:
+        description: "Release type: auto | major | minor | patch | custom"
+        type: string
+        default: "auto"
+      custom-tag:
+        description: "Custom tag (only used when release-type is 'custom')"
+        type: string
+        default: ""
+      draft:
+        description: "Create release as draft"
+        type: boolean
+        default: false
+      prerelease:
+        description: "Mark as pre-release"
+        type: boolean
+        default: false
+      generate-release-notes:
+        description: "Auto-generate release notes from commits"
+        type: boolean
+        default: true
+      artifact-name:
+        description: "Name of artifact to download and attach to release"
+        type: string
+        default: ""
+      artifact-path:
+        description: "Glob pattern for release assets"
+        type: string
+        default: ""
+      changelog-file:
+        description: "Path to CHANGELOG file to update"
+        type: string
+        default: ""
+
+    outputs:
+      version:
+        description: "Released version"
+        value: ${{ jobs.release.outputs.version }}
+      tag:
+        description: "Git tag created"
+        value: ${{ jobs.release.outputs.tag }}
+      release-url:
+        description: "GitHub Release URL"
+        value: ${{ jobs.release.outputs.release-url }}
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  release:
+    name: "Create Release"
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      release-url: ${{ steps.create-release.outputs.url }}
+
+    steps:
+      # ── Checkout ──────────────────────────────────────────────────────
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # ── Determine version ────────────────────────────────────────────
+      - name: Get latest tag
+        id: latest-tag
+        run: |
+          LATEST=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          echo "tag=$LATEST" >> "$GITHUB_OUTPUT"
+          echo "Latest tag: $LATEST"
+
+      - name: Determine next version
+        id: version
+        run: |
+          LATEST="${{ steps.latest-tag.outputs.tag }}"
+          # Strip 'v' prefix
+          VERSION="${LATEST#v}"
+          MAJOR=$(echo "$VERSION" | cut -d. -f1)
+          MINOR=$(echo "$VERSION" | cut -d. -f2)
+          PATCH=$(echo "$VERSION" | cut -d. -f3)
+
+          case "${{ inputs.release-type }}" in
+            major)
+              MAJOR=$((MAJOR + 1))
+              MINOR=0
+              PATCH=0
+              ;;
+            minor)
+              MINOR=$((MINOR + 1))
+              PATCH=0
+              ;;
+            patch)
+              PATCH=$((PATCH + 1))
+              ;;
+            custom)
+              echo "version=${{ inputs.custom-tag }}" >> "$GITHUB_OUTPUT"
+              echo "tag=${{ inputs.custom-tag }}" >> "$GITHUB_OUTPUT"
+              exit 0
+              ;;
+            auto)
+              # Parse conventional commits since last tag
+              COMMITS=$(git log "${LATEST}..HEAD" --pretty=format:"%s" 2>/dev/null || git log --pretty=format:"%s")
+
+              if echo "$COMMITS" | grep -qiE "^(feat|feature)(\(.+\))?!:|BREAKING CHANGE"; then
+                MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0
+              elif echo "$COMMITS" | grep -qiE "^feat(\(.+\))?:"; then
+                MINOR=$((MINOR + 1)); PATCH=0
+              else
+                PATCH=$((PATCH + 1))
+              fi
+              ;;
+          esac
+
+          NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+          echo "version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Next version: v${NEW_VERSION}"
+
+      # ── Download artifacts ───────────────────────────────────────────
+      - name: Download build artifacts
+        if: inputs.artifact-name != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: ./release-assets/
+
+      # ── Generate changelog ───────────────────────────────────────────
+      - name: Generate changelog
+        id: changelog
+        run: |
+          LATEST="${{ steps.latest-tag.outputs.tag }}"
+          TAG="${{ steps.version.outputs.tag }}"
+
+          {
+            echo "body<<CHANGELOG_EOF"
+            echo "## What's Changed"
+            echo ""
+
+            # Breaking changes
+            BREAKING=$(git log "${LATEST}..HEAD" --pretty=format:"- %s (%h)" --grep="BREAKING CHANGE" --grep="^.*!:" --extended-regexp 2>/dev/null || true)
+            if [ -n "$BREAKING" ]; then
+              echo "### Breaking Changes"
+              echo "$BREAKING"
+              echo ""
+            fi
+
+            # Features
+            FEATURES=$(git log "${LATEST}..HEAD" --pretty=format:"- %s (%h)" --grep="^feat" --extended-regexp 2>/dev/null || true)
+            if [ -n "$FEATURES" ]; then
+              echo "### Features"
+              echo "$FEATURES"
+              echo ""
+            fi
+
+            # Bug fixes
+            FIXES=$(git log "${LATEST}..HEAD" --pretty=format:"- %s (%h)" --grep="^fix" --extended-regexp 2>/dev/null || true)
+            if [ -n "$FIXES" ]; then
+              echo "### Bug Fixes"
+              echo "$FIXES"
+              echo ""
+            fi
+
+            # Other
+            OTHER=$(git log "${LATEST}..HEAD" --pretty=format:"- %s (%h)" --grep="^feat\|^fix\|BREAKING" --invert-grep --extended-regexp 2>/dev/null || true)
+            if [ -n "$OTHER" ]; then
+              echo "### Other Changes"
+              echo "$OTHER"
+              echo ""
+            fi
+
+            echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${LATEST}...${TAG}"
+            echo "CHANGELOG_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      # ── Create tag ───────────────────────────────────────────────────
+      - name: Create and push tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ steps.version.outputs.tag }}" -m "Release ${{ steps.version.outputs.tag }}"
+          git push origin "${{ steps.version.outputs.tag }}"
+
+      # ── Create GitHub Release ────────────────────────────────────────
+      - name: Create GitHub Release
+        id: create-release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: "Release ${{ steps.version.outputs.tag }}"
+          body: ${{ steps.changelog.outputs.body }}
+          draft: ${{ inputs.draft }}
+          prerelease: ${{ inputs.prerelease }}
+          generate_release_notes: ${{ inputs.generate-release-notes }}
+          files: |
+            ./release-assets/**
+            ${{ inputs.artifact-path }}
+
+      # ── Summary ──────────────────────────────────────────────────────
+      - name: Release summary
+        run: |
+          echo "## Release Created" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Property | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| --- | --- |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Version** | ${{ steps.version.outputs.version }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Tag** | ${{ steps.version.outputs.tag }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Draft** | ${{ inputs.draft }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Pre-release** | ${{ inputs.prerelease }} |" >> "$GITHUB_STEP_SUMMARY"

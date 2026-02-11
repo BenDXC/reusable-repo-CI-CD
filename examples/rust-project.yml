@@ -1,0 +1,64 @@
+# ============================================================================
+# Example: Rust Project CI/CD Pipeline
+# ============================================================================
+# Copy this file to your project's .github/workflows/ directory and adjust
+# the 'uses' path to point to your fork/copy of the reusable workflows repo.
+# ============================================================================
+
+name: "Rust CI/CD"
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── PR Checks ────────────────────────────────────────────────────────
+  pr-checks:
+    if: github.event_name == 'pull_request'
+    uses: <owner>/<repo>/.github/workflows/reusable-pr-checks.yml@main
+
+  # ── CI (multi-platform) ─────────────────────────────────────────────
+  ci:
+    uses: <owner>/<repo>/.github/workflows/reusable-ci-rust.yml@main
+    with:
+      rust-toolchain: "stable"
+      enable-fmt-check: true
+      enable-clippy: true
+      enable-test: true
+      enable-build: true
+      targets: '["ubuntu-latest", "macos-latest", "windows-latest"]'
+
+  # ── Security ─────────────────────────────────────────────────────────
+  security:
+    uses: <owner>/<repo>/.github/workflows/reusable-security-scan.yml@main
+    with:
+      enable-codeql: false
+      enable-dependency-review: true
+      enable-trivy: true
+      trivy-scan-type: "fs"
+
+  # ── Docker ───────────────────────────────────────────────────────────
+  docker:
+    needs: [ci]
+    if: github.ref == 'refs/heads/main'
+    uses: <owner>/<repo>/.github/workflows/reusable-cd-docker.yml@main
+    with:
+      registry: "ghcr"
+      push: true
+      dockerfile: "./Dockerfile"
+      target: "runtime"
+
+  # ── Release ──────────────────────────────────────────────────────────
+  release:
+    needs: [ci]
+    if: github.ref == 'refs/heads/main'
+    uses: <owner>/<repo>/.github/workflows/reusable-release.yml@main
+    with:
+      release-type: "auto"
+      artifact-name: "rust-build-Linux"

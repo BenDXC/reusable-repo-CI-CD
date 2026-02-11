@@ -1,0 +1,80 @@
+# ============================================================================
+# Example: Node.js / TypeScript Project CI/CD Pipeline
+# ============================================================================
+# Copy this file to your project's .github/workflows/ directory and adjust
+# the 'uses' path to point to your fork/copy of the reusable workflows repo.
+# ============================================================================
+
+name: "Node.js CI/CD"
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── PR Checks ────────────────────────────────────────────────────────
+  pr-checks:
+    if: github.event_name == 'pull_request'
+    uses: <owner>/<repo>/.github/workflows/reusable-pr-checks.yml@main
+
+  # ── CI ───────────────────────────────────────────────────────────────
+  ci:
+    uses: <owner>/<repo>/.github/workflows/reusable-ci-node.yml@main
+    with:
+      node-versions: '["18", "20", "22"]'
+      package-manager: "pnpm"
+      pnpm-version: "9"
+      enable-lint: true
+      enable-test: true
+      enable-build: true
+      enable-coverage: true
+    secrets:
+      codecov-token: ${{ secrets.CODECOV_TOKEN }}
+      npm-token: ${{ secrets.NPM_TOKEN }}
+
+  # ── Security ─────────────────────────────────────────────────────────
+  security:
+    uses: <owner>/<repo>/.github/workflows/reusable-security-scan.yml@main
+    with:
+      enable-codeql: true
+      languages: '["javascript"]'
+      enable-dependency-review: true
+
+  # ── Docker ───────────────────────────────────────────────────────────
+  docker:
+    needs: [ci]
+    if: github.ref == 'refs/heads/main'
+    uses: <owner>/<repo>/.github/workflows/reusable-cd-docker.yml@main
+    with:
+      registry: "ghcr"
+      push: true
+
+  # ── Deploy to GCP Cloud Run ─────────────────────────────────────────
+  deploy:
+    needs: [docker]
+    uses: <owner>/<repo>/.github/workflows/reusable-cd-deploy.yml@main
+    with:
+      provider: "gcp"
+      target: "cloud-run"
+      image: ${{ needs.docker.outputs.image-tags }}
+      environment: "production"
+      gcp-project-id: "my-gcp-project"
+      gcp-region: "us-central1"
+      cloud-run-service: "my-app"
+    secrets:
+      gcp-workload-identity-provider: ${{ secrets.GCP_WIF_PROVIDER }}
+      gcp-service-account: ${{ secrets.GCP_SA_EMAIL }}
+
+  # ── Release ──────────────────────────────────────────────────────────
+  release:
+    needs: [deploy]
+    if: github.ref == 'refs/heads/main'
+    uses: <owner>/<repo>/.github/workflows/reusable-release.yml@main
+    with:
+      release-type: "auto"

@@ -1,0 +1,180 @@
+# ============================================================================
+# Reusable Workflow — Security Scanning
+# ============================================================================
+# Runs CodeQL analysis, dependency review, and optional container scanning
+# with Trivy. Also supports secret scanning and license compliance.
+#
+# Usage (caller workflow):
+#   jobs:
+#     security:
+#       uses: <owner>/<repo>/.github/workflows/reusable-security-scan.yml@main
+#       with:
+#         languages: '["python", "javascript"]'
+# ============================================================================
+
+name: "Security Scan"
+
+on:
+  workflow_call:
+    inputs:
+      enable-codeql:
+        description: "Run CodeQL code scanning"
+        type: boolean
+        default: true
+      languages:
+        description: 'JSON array of CodeQL languages: ["javascript", "python", "java", "go", "csharp", "cpp", "ruby", "swift"]'
+        type: string
+        default: '["javascript"]'
+      enable-dependency-review:
+        description: "Run dependency review (PR only)"
+        type: boolean
+        default: true
+      enable-trivy:
+        description: "Run Trivy vulnerability scanner"
+        type: boolean
+        default: false
+      trivy-scan-type:
+        description: "Trivy scan type: fs | image | repo"
+        type: string
+        default: "fs"
+      trivy-image-ref:
+        description: "Container image to scan (for image scan type)"
+        type: string
+        default: ""
+      trivy-severity:
+        description: "Severity levels to scan for"
+        type: string
+        default: "CRITICAL,HIGH"
+      enable-osv-scanner:
+        description: "Run OSV Scanner for known vulnerabilities"
+        type: boolean
+        default: false
+      working-directory:
+        description: "Working directory"
+        type: string
+        default: "."
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+  pull-requests: read
+
+jobs:
+  # ════════════════════════════════════════════════════════════════════════
+  # CodeQL Analysis
+  # ════════════════════════════════════════════════════════════════════════
+  codeql:
+    name: "CodeQL (${{ matrix.language }})"
+    if: inputs.enable-codeql
+    runs-on: ${{ (matrix.language == 'swift' && 'macos-latest') || 'ubuntu-latest' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ${{ fromJSON(inputs.languages) }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-extended,security-and-quality
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"
+
+  # ════════════════════════════════════════════════════════════════════════
+  # Dependency Review (PR only)
+  # ════════════════════════════════════════════════════════════════════════
+  dependency-review:
+    name: "Dependency Review"
+    if: inputs.enable-dependency-review && github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Dependency review
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
+          deny-licenses: GPL-2.0, GPL-3.0, AGPL-3.0
+          comment-summary-in-pr: always
+
+  # ════════════════════════════════════════════════════════════════════════
+  # Trivy Vulnerability Scanner
+  # ════════════════════════════════════════════════════════════════════════
+  trivy:
+    name: "Trivy Scan"
+    if: inputs.enable-trivy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Trivy (filesystem)
+        if: inputs.trivy-scan-type == 'fs'
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: ${{ inputs.working-directory }}
+          format: sarif
+          output: trivy-results.sarif
+          severity: ${{ inputs.trivy-severity }}
+
+      - name: Run Trivy (image)
+        if: inputs.trivy-scan-type == 'image'
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: image
+          image-ref: ${{ inputs.trivy-image-ref }}
+          format: sarif
+          output: trivy-results.sarif
+          severity: ${{ inputs.trivy-severity }}
+
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-results.sarif
+
+  # ════════════════════════════════════════════════════════════════════════
+  # OSV Scanner
+  # ════════════════════════════════════════════════════════════════════════
+  osv-scanner:
+    name: "OSV Scanner"
+    if: inputs.enable-osv-scanner
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run OSV Scanner
+        uses: google/osv-scanner-action/osv-scanner-action@v1
+        with:
+          scan-args: |-
+            --recursive
+            --format=json
+            --output=osv-results.json
+            ${{ inputs.working-directory }}
+        continue-on-error: true
+
+      - name: Upload OSV results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: osv-scan-results
+          path: osv-results.json
+          retention-days: 30
+          if-no-files-found: ignore

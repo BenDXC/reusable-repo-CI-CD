@@ -1,0 +1,45 @@
+# ============================================================================
+# Example: Minimal CI-Only Pipeline
+# ============================================================================
+# The simplest possible usage — just CI with sensible defaults.
+# Great for libraries, open-source packages, or early-stage projects.
+# ============================================================================
+
+name: "CI"
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Pick ONE of the language workflows below ─────────────────────────
+
+  # Python (minimal — just uses defaults)
+  # ci:
+  #   uses: <owner>/<repo>/.github/workflows/reusable-ci-python.yml@main
+
+  # Node.js (minimal)
+  # ci:
+  #   uses: <owner>/<repo>/.github/workflows/reusable-ci-node.yml@main
+
+  # Java (minimal)
+  # ci:
+  #   uses: <owner>/<repo>/.github/workflows/reusable-ci-java.yml@main
+
+  # Go (minimal)
+  ci:
+    uses: <owner>/<repo>/.github/workflows/reusable-ci-go.yml@main
+
+  # Rust (minimal)
+  # ci:
+  #   uses: <owner>/<repo>/.github/workflows/reusable-ci-rust.yml@main
+
+  # .NET (minimal)
+  # ci:
+  #   uses: <owner>/<repo>/.github/workflows/reusable-ci-dotnet.yml@main

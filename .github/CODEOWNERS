@@ -1,0 +1,18 @@
+# ============================================================================
+# CODEOWNERS — Define code ownership for automatic review assignment
+# ============================================================================
+# Customize the teams/users below for your organization.
+# See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+# ============================================================================
+
+# Default owners for everything
+* @your-org/platform-team
+
+# CI/CD workflow files
+.github/workflows/ @your-org/devops-team
+
+# Dependabot configuration
+.github/dependabot.yml @your-org/devops-team
+
+# Documentation
+*.md @your-org/platform-team

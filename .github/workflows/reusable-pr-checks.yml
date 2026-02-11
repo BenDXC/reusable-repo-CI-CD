@@ -1,0 +1,210 @@
+# ============================================================================
+# Reusable Workflow — Pull Request Quality Checks
+# ============================================================================
+# Validates PR titles (conventional commits), checks PR size, manages
+# labels, and runs actionable checks before merge.
+#
+# Usage (caller workflow):
+#   jobs:
+#     pr:
+#       uses: <owner>/<repo>/.github/workflows/reusable-pr-checks.yml@main
+# ============================================================================
+
+name: "PR Checks"
+
+on:
+  workflow_call:
+    inputs:
+      enable-title-check:
+        description: "Validate PR title follows conventional commits"
+        type: boolean
+        default: true
+      enable-size-label:
+        description: "Add size labels to PR"
+        type: boolean
+        default: true
+      enable-conflict-check:
+        description: "Check for merge conflicts"
+        type: boolean
+        default: true
+      max-files-changed:
+        description: "Maximum files changed before warning (0 = disabled)"
+        type: number
+        default: 50
+      max-lines-changed:
+        description: "Maximum lines changed before warning (0 = disabled)"
+        type: number
+        default: 1000
+      conventional-commit-types:
+        description: "Allowed conventional commit types (comma-separated)"
+        type: string
+        default: "feat,fix,docs,style,refactor,perf,test,build,ci,chore,revert"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  pr-checks:
+    name: "PR Quality Checks"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || github.event_name == 'pull_request_target'
+
+    steps:
+      # ── Checkout ──────────────────────────────────────────────────────
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ── PR title validation ──────────────────────────────────────────
+      - name: Validate PR title (Conventional Commits)
+        if: inputs.enable-title-check
+        run: |
+          PR_TITLE="${{ github.event.pull_request.title }}"
+          TYPES="${{ inputs.conventional-commit-types }}"
+
+          # Build regex from allowed types
+          REGEX="^($(echo "$TYPES" | sed 's/,/|/g'))(\(.+\))?(!)?: .+"
+
+          if ! echo "$PR_TITLE" | grep -qE "$REGEX"; then
+            echo "::error::PR title does not follow conventional commits format."
+            echo ""
+            echo "Expected format: <type>(<optional-scope>): <description>"
+            echo "Allowed types: $TYPES"
+            echo ""
+            echo "Examples:"
+            echo "  feat: add user authentication"
+            echo "  fix(api): handle null response"
+            echo "  docs: update API documentation"
+            echo "  feat!: redesign authentication flow"
+            exit 1
+          fi
+
+          echo "PR title is valid: $PR_TITLE"
+
+      # ── PR size labels ───────────────────────────────────────────────
+      - name: Add size labels
+        if: inputs.enable-size-label
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number
+            });
+
+            const changes = pr.additions + pr.deletions;
+            const files = pr.changed_files;
+
+            // Determine size label
+            let sizeLabel;
+            if (changes < 10) sizeLabel = 'size/XS';
+            else if (changes < 50) sizeLabel = 'size/S';
+            else if (changes < 200) sizeLabel = 'size/M';
+            else if (changes < 500) sizeLabel = 'size/L';
+            else sizeLabel = 'size/XL';
+
+            // Remove existing size labels
+            const existingLabels = pr.labels
+              .filter(l => l.name.startsWith('size/'))
+              .map(l => l.name);
+
+            for (const label of existingLabels) {
+              try {
+                await github.rest.issues.removeLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.issue.number,
+                  name: label
+                });
+              } catch (e) { /* label may not exist */ }
+            }
+
+            // Ensure label exists
+            try {
+              await github.rest.issues.getLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                name: sizeLabel
+              });
+            } catch {
+              const colors = {
+                'size/XS': '3CBF00', 'size/S': '5D9801',
+                'size/M': '7F7203', 'size/L': 'A14C05', 'size/XL': 'C32607'
+              };
+              await github.rest.issues.createLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                name: sizeLabel,
+                color: colors[sizeLabel] || '666666'
+              });
+            }
+
+            // Add size label
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              labels: [sizeLabel]
+            });
+
+            console.log(`PR: +${pr.additions} -${pr.deletions} (${changes} total), ${files} files → ${sizeLabel}`);
+
+      # ── PR size warnings ─────────────────────────────────────────────
+      - name: Check PR size
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const maxFiles = ${{ inputs.max-files-changed }};
+            const maxLines = ${{ inputs.max-lines-changed }};
+
+            if (maxFiles === 0 && maxLines === 0) return;
+
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number
+            });
+
+            const warnings = [];
+            const changes = pr.additions + pr.deletions;
+
+            if (maxFiles > 0 && pr.changed_files > maxFiles) {
+              warnings.push(`This PR changes **${pr.changed_files} files** (recommended max: ${maxFiles}).`);
+            }
+
+            if (maxLines > 0 && changes > maxLines) {
+              warnings.push(`This PR has **${changes} line changes** (recommended max: ${maxLines}).`);
+            }
+
+            if (warnings.length > 0) {
+              const body = [
+                '## Large PR Warning',
+                '',
+                ...warnings,
+                '',
+                'Consider breaking this PR into smaller, focused changes for easier review.',
+              ].join('\n');
+
+              core.warning(body);
+
+              // Check if we already commented
+              const { data: comments } = await github.rest.issues.listComments({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+              });
+
+              const botComment = comments.find(c =>
+                c.user.type === 'Bot' && c.body.includes('Large PR Warning')
+              );
+
+              if (!botComment) {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.issue.number,
+                  body: body,
+                });
+              }
+            }

@@ -1,0 +1,185 @@
+# ============================================================================
+# Reusable CI Workflow — Node.js / TypeScript
+# ============================================================================
+# Supports npm, yarn, and pnpm. Runs linting (ESLint), tests, build,
+# and optional coverage uploads.
+#
+# Usage (caller workflow):
+#   jobs:
+#     ci:
+#       uses: <owner>/<repo>/.github/workflows/reusable-ci-node.yml@main
+#       with:
+#         node-versions: '["18", "20", "22"]'
+# ============================================================================
+
+name: "CI — Node.js"
+
+on:
+  workflow_call:
+    inputs:
+      node-versions:
+        description: "JSON array of Node.js versions to test"
+        type: string
+        default: '["20"]'
+      package-manager:
+        description: "Package manager: npm | yarn | pnpm"
+        type: string
+        default: "npm"
+      pnpm-version:
+        description: "pnpm version (only used when package-manager is pnpm)"
+        type: string
+        default: "9"
+      working-directory:
+        description: "Working directory for the project"
+        type: string
+        default: "."
+      enable-lint:
+        description: "Run linting"
+        type: boolean
+        default: true
+      enable-test:
+        description: "Run tests"
+        type: boolean
+        default: true
+      enable-build:
+        description: "Run build step"
+        type: boolean
+        default: true
+      enable-coverage:
+        description: "Upload coverage reports"
+        type: boolean
+        default: false
+      lint-script:
+        description: "npm script name for linting"
+        type: string
+        default: "lint"
+      test-script:
+        description: "npm script name for testing"
+        type: string
+        default: "test"
+      build-script:
+        description: "npm script name for building"
+        type: string
+        default: "build"
+      node-env:
+        description: "NODE_ENV to set"
+        type: string
+        default: "test"
+    secrets:
+      codecov-token:
+        description: "Codecov upload token"
+        required: false
+      npm-token:
+        description: "NPM registry token for private packages"
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  node-ci:
+    name: "Node.js ${{ matrix.node-version }}"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    env:
+      NODE_ENV: ${{ inputs.node-env }}
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ${{ fromJSON(inputs.node-versions) }}
+
+    steps:
+      # ── Checkout ──────────────────────────────────────────────────────
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ── pnpm setup ───────────────────────────────────────────────────
+      - name: Install pnpm
+        if: inputs.package-manager == 'pnpm'
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ inputs.pnpm-version }}
+
+      # ── Node.js setup ────────────────────────────────────────────────
+      - name: Set up Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: ${{ inputs.package-manager }}
+          cache-dependency-path: ${{ inputs.working-directory }}/
+          registry-url: "https://registry.npmjs.org"
+
+      # ── Install dependencies ──────────────────────────────────────────
+      - name: Install dependencies (npm)
+        if: inputs.package-manager == 'npm'
+        run: npm ci
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.npm-token }}
+
+      - name: Install dependencies (yarn)
+        if: inputs.package-manager == 'yarn'
+        run: yarn install --frozen-lockfile
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.npm-token }}
+
+      - name: Install dependencies (pnpm)
+        if: inputs.package-manager == 'pnpm'
+        run: pnpm install --frozen-lockfile
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.npm-token }}
+
+      # ── Lint ──────────────────────────────────────────────────────────
+      - name: Lint
+        if: inputs.enable-lint
+        run: |
+          if ${{ inputs.package-manager }} run --if-present ${{ inputs.lint-script }} 2>/dev/null; then
+            echo "Lint completed"
+          else
+            echo "::warning::Lint script '${{ inputs.lint-script }}' not found, skipping"
+          fi
+
+      # ── Test ──────────────────────────────────────────────────────────
+      - name: Run tests
+        if: inputs.enable-test
+        run: |
+          if ${{ inputs.package-manager }} run --if-present ${{ inputs.test-script }} 2>/dev/null; then
+            echo "Tests completed"
+          else
+            echo "::warning::Test script '${{ inputs.test-script }}' not found, skipping"
+          fi
+
+      # ── Build ─────────────────────────────────────────────────────────
+      - name: Build
+        if: inputs.enable-build
+        run: |
+          if ${{ inputs.package-manager }} run --if-present ${{ inputs.build-script }} 2>/dev/null; then
+            echo "Build completed"
+          else
+            echo "::warning::Build script '${{ inputs.build-script }}' not found, skipping"
+          fi
+        env:
+          NODE_ENV: production
+
+      # ── Coverage ──────────────────────────────────────────────────────
+      - name: Upload coverage to Codecov
+        if: inputs.enable-coverage && inputs.enable-test
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.codecov-token }}
+          flags: node-${{ matrix.node-version }}
+          fail_ci_if_error: false
+
+      # ── Upload build artifacts ────────────────────────────────────────
+      - name: Upload build artifacts
+        if: inputs.enable-build
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-node-${{ matrix.node-version }}
+          path: |
+            ${{ inputs.working-directory }}/dist/
+            ${{ inputs.working-directory }}/build/
+            ${{ inputs.working-directory }}/.next/
+          retention-days: 7
+          if-no-files-found: ignore

@@ -1,0 +1,122 @@
+# ============================================================================
+# Reusable CI Workflow — Go
+# ============================================================================
+# Runs linting (golangci-lint), tests with race detection, and builds.
+#
+# Usage (caller workflow):
+#   jobs:
+#     ci:
+#       uses: <owner>/<repo>/.github/workflows/reusable-ci-go.yml@main
+#       with:
+#         go-versions: '["1.22", "1.23"]'
+# ============================================================================
+
+name: "CI — Go"
+
+on:
+  workflow_call:
+    inputs:
+      go-versions:
+        description: "JSON array of Go versions to test"
+        type: string
+        default: '["1.23"]'
+      working-directory:
+        description: "Working directory for the project"
+        type: string
+        default: "."
+      enable-lint:
+        description: "Run golangci-lint"
+        type: boolean
+        default: true
+      enable-test:
+        description: "Run tests"
+        type: boolean
+        default: true
+      enable-build:
+        description: "Run build"
+        type: boolean
+        default: true
+      enable-coverage:
+        description: "Upload coverage reports"
+        type: boolean
+        default: false
+      golangci-lint-version:
+        description: "golangci-lint version"
+        type: string
+        default: "v1.62"
+      test-args:
+        description: "Additional test arguments"
+        type: string
+        default: "-race -count=1"
+      build-args:
+        description: "Additional build arguments"
+        type: string
+        default: "./..."
+    secrets:
+      codecov-token:
+        description: "Codecov upload token"
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  go-ci:
+    name: "Go ${{ matrix.go-version }}"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    strategy:
+      fail-fast: false
+      matrix:
+        go-version: ${{ fromJSON(inputs.go-versions) }}
+
+    steps:
+      # ── Checkout ──────────────────────────────────────────────────────
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ── Go setup ─────────────────────────────────────────────────────
+      - name: Set up Go ${{ matrix.go-version }}
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go-version }}
+          cache-dependency-path: ${{ inputs.working-directory }}/go.sum
+
+      # ── Verify dependencies ──────────────────────────────────────────
+      - name: Verify dependencies
+        run: |
+          go mod verify
+          go mod tidy
+          git diff --exit-code go.mod go.sum || \
+            (echo "::error::go.mod or go.sum is not tidy. Run 'go mod tidy' and commit." && exit 1)
+
+      # ── Lint ──────────────────────────────────────────────────────────
+      - name: Lint with golangci-lint
+        if: inputs.enable-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: ${{ inputs.golangci-lint-version }}
+          working-directory: ${{ inputs.working-directory }}
+
+      # ── Test ──────────────────────────────────────────────────────────
+      - name: Run tests
+        if: inputs.enable-test
+        run: |
+          go test ${{ inputs.test-args }} -coverprofile=coverage.out -covermode=atomic ./...
+
+      # ── Build ─────────────────────────────────────────────────────────
+      - name: Build
+        if: inputs.enable-build
+        run: go build -v ${{ inputs.build-args }}
+
+      # ── Coverage ──────────────────────────────────────────────────────
+      - name: Upload coverage to Codecov
+        if: inputs.enable-coverage && inputs.enable-test
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.codecov-token }}
+          file: coverage.out
+          flags: go-${{ matrix.go-version }}
+          fail_ci_if_error: false

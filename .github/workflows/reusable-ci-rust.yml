@@ -1,0 +1,129 @@
+# ============================================================================
+# Reusable CI Workflow — Rust
+# ============================================================================
+# Runs formatting checks (rustfmt), linting (clippy), tests, and builds.
+#
+# Usage (caller workflow):
+#   jobs:
+#     ci:
+#       uses: <owner>/<repo>/.github/workflows/reusable-ci-rust.yml@main
+#       with:
+#         rust-toolchain: "stable"
+# ============================================================================
+
+name: "CI — Rust"
+
+on:
+  workflow_call:
+    inputs:
+      rust-toolchain:
+        description: "Rust toolchain: stable | beta | nightly | specific version"
+        type: string
+        default: "stable"
+      working-directory:
+        description: "Working directory for the project"
+        type: string
+        default: "."
+      enable-fmt-check:
+        description: "Run rustfmt check"
+        type: boolean
+        default: true
+      enable-clippy:
+        description: "Run clippy lints"
+        type: boolean
+        default: true
+      enable-test:
+        description: "Run tests"
+        type: boolean
+        default: true
+      enable-build:
+        description: "Run release build"
+        type: boolean
+        default: false
+      clippy-args:
+        description: "Additional clippy arguments"
+        type: string
+        default: "-- -D warnings"
+      test-args:
+        description: "Additional test arguments"
+        type: string
+        default: ""
+      cargo-features:
+        description: "Cargo feature flags"
+        type: string
+        default: ""
+      targets:
+        description: 'JSON array of OS targets: ["ubuntu-latest", "macos-latest", "windows-latest"]'
+        type: string
+        default: '["ubuntu-latest"]'
+
+permissions:
+  contents: read
+
+jobs:
+  rust-ci:
+    name: "Rust ${{ inputs.rust-toolchain }} (${{ matrix.os }})"
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(inputs.targets) }}
+
+    steps:
+      # ── Checkout ──────────────────────────────────────────────────────
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ── Rust toolchain setup ─────────────────────────────────────────
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ inputs.rust-toolchain }}
+          components: rustfmt, clippy
+
+      # ── Cache ─────────────────────────────────────────────────────────
+      - name: Cache Cargo registry & build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            ${{ inputs.working-directory }}/target/
+          key: cargo-${{ runner.os }}-${{ inputs.rust-toolchain }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-${{ inputs.rust-toolchain }}-
+
+      # ── Format check ─────────────────────────────────────────────────
+      - name: Check formatting
+        if: inputs.enable-fmt-check
+        run: cargo fmt --all -- --check
+
+      # ── Clippy ───────────────────────────────────────────────────────
+      - name: Clippy lints
+        if: inputs.enable-clippy
+        run: cargo clippy --all-targets --all-features ${{ inputs.clippy-args }}
+
+      # ── Test ──────────────────────────────────────────────────────────
+      - name: Run tests
+        if: inputs.enable-test
+        run: cargo test --all-features ${{ inputs.test-args }}
+
+      # ── Build ─────────────────────────────────────────────────────────
+      - name: Build (release)
+        if: inputs.enable-build
+        run: cargo build --release ${{ inputs.cargo-features }}
+
+      # ── Upload build artifacts ────────────────────────────────────────
+      - name: Upload build artifacts
+        if: inputs.enable-build
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-build-${{ runner.os }}
+          path: ${{ inputs.working-directory }}/target/release/
+          retention-days: 7
+          if-no-files-found: ignore
