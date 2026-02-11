@@ -286,7 +286,7 @@ jobs:
       # ── Container Apps Deploy ────────────────────────────────────────
       - name: Deploy to Azure Container Apps
         if: inputs.target == 'container-apps'
-        uses: azure/container-apps-deploy-action@v1
+        uses: azure/container-apps-deploy-action@v2
         with:
           resourceGroup: ${{ inputs.azure-resource-group }}
           containerAppName: ${{ inputs.azure-container-app }}
