@@ -44,9 +44,7 @@ A production-ready collection of reusable GitHub Actions workflows that cover th
 ✅ **Observable** - Clear progress indicators and error messages  
 ✅ **Validated** - Project structure checked before expensive operations  
 ✅ **Resilient** - Proper error handling, no silent failures  
-✅ **Production-Ready** - Battle-tested patterns from 20 years of experience  
-
-See [IMPROVEMENTS_APPLIED.md](IMPROVEMENTS_APPLIED.md) for detailed breakdown of all improvements.
+✅ **Production-Ready** - Battle-tested patterns from 20 years of experience
 
 ---
 
