@@ -1,0 +1,132 @@
+# ============================================================================
+# Reusable CI Workflow — Java (Maven / Gradle)
+# ============================================================================
+# Supports Maven and Gradle build tools with multi-JDK matrix testing.
+#
+# Usage (caller workflow):
+#   jobs:
+#     ci:
+#       uses: <owner>/<repo>/.github/workflows/reusable-ci-java.yml@main
+#       with:
+#         java-versions: '["17", "21"]'
+#         build-tool: "maven"
+# ============================================================================
+
+name: "CI — Java"
+
+on:
+  workflow_call:
+    inputs:
+      java-versions:
+        description: "JSON array of Java versions to test"
+        type: string
+        default: '["21"]'
+      distribution:
+        description: "Java distribution: temurin | corretto | microsoft | oracle | zulu"
+        type: string
+        default: "temurin"
+      build-tool:
+        description: "Build tool: maven | gradle"
+        type: string
+        default: "maven"
+      working-directory:
+        description: "Working directory for the project"
+        type: string
+        default: "."
+      enable-test:
+        description: "Run tests"
+        type: boolean
+        default: true
+      enable-coverage:
+        description: "Upload coverage reports"
+        type: boolean
+        default: false
+      maven-args:
+        description: "Additional Maven arguments"
+        type: string
+        default: ""
+      gradle-args:
+        description: "Additional Gradle arguments"
+        type: string
+        default: ""
+    secrets:
+      codecov-token:
+        description: "Codecov upload token"
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  java-ci:
+    name: "Java ${{ matrix.java-version }} (${{ inputs.build-tool }})"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    strategy:
+      fail-fast: false
+      matrix:
+        java-version: ${{ fromJSON(inputs.java-versions) }}
+
+    steps:
+      # ── Checkout ──────────────────────────────────────────────────────
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ── Java setup ───────────────────────────────────────────────────
+      - name: Set up JDK ${{ matrix.java-version }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ matrix.java-version }}
+          distribution: ${{ inputs.distribution }}
+          cache: ${{ inputs.build-tool }}
+
+      # ── Gradle wrapper validation ────────────────────────────────────
+      - name: Validate Gradle wrapper
+        if: inputs.build-tool == 'gradle'
+        uses: gradle/actions/wrapper-validation@v4
+
+      # ── Build & Test (Maven) ─────────────────────────────────────────
+      - name: Build with Maven
+        if: inputs.build-tool == 'maven'
+        run: |
+          chmod +x mvnw 2>/dev/null || true
+          if [ -f "mvnw" ]; then
+            ./mvnw -B verify ${{ inputs.maven-args }}
+          else
+            mvn -B verify ${{ inputs.maven-args }}
+          fi
+
+      # ── Build & Test (Gradle) ────────────────────────────────────────
+      - name: Build with Gradle
+        if: inputs.build-tool == 'gradle'
+        run: |
+          chmod +x gradlew 2>/dev/null || true
+          if [ -f "gradlew" ]; then
+            ./gradlew build ${{ inputs.gradle-args }}
+          else
+            gradle build ${{ inputs.gradle-args }}
+          fi
+
+      # ── Test reports ─────────────────────────────────────────────────
+      - name: Upload test results
+        if: always() && inputs.enable-test
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-java-${{ matrix.java-version }}
+          path: |
+            ${{ inputs.working-directory }}/**/target/surefire-reports/
+            ${{ inputs.working-directory }}/**/target/failsafe-reports/
+            ${{ inputs.working-directory }}/**/build/reports/tests/
+          retention-days: 7
+          if-no-files-found: ignore
+
+      # ── Coverage ──────────────────────────────────────────────────────
+      - name: Upload coverage to Codecov
+        if: inputs.enable-coverage
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.codecov-token }}
+          flags: java-${{ matrix.java-version }}
+          fail_ci_if_error: false

@@ -1,0 +1,139 @@
+# ============================================================================
+# Reusable CI Workflow — .NET (C# / F#)
+# ============================================================================
+# Restores, builds, tests, and optionally publishes .NET projects.
+#
+# Usage (caller workflow):
+#   jobs:
+#     ci:
+#       uses: <owner>/<repo>/.github/workflows/reusable-ci-dotnet.yml@main
+#       with:
+#         dotnet-versions: '["8.0.x", "9.0.x"]'
+# ============================================================================
+
+name: "CI — .NET"
+
+on:
+  workflow_call:
+    inputs:
+      dotnet-versions:
+        description: "JSON array of .NET SDK versions"
+        type: string
+        default: '["8.0.x"]'
+      working-directory:
+        description: "Working directory for the project"
+        type: string
+        default: "."
+      solution-file:
+        description: "Path to solution or project file (relative to working-directory)"
+        type: string
+        default: ""
+      enable-test:
+        description: "Run tests"
+        type: boolean
+        default: true
+      enable-coverage:
+        description: "Upload coverage reports"
+        type: boolean
+        default: false
+      build-configuration:
+        description: "Build configuration: Debug | Release"
+        type: string
+        default: "Release"
+      dotnet-test-args:
+        description: "Additional dotnet test arguments"
+        type: string
+        default: ""
+      enable-format-check:
+        description: "Run dotnet format check"
+        type: boolean
+        default: false
+    secrets:
+      codecov-token:
+        description: "Codecov upload token"
+        required: false
+      nuget-auth-token:
+        description: "NuGet feed authentication token"
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  dotnet-ci:
+    name: ".NET ${{ matrix.dotnet-version }}"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    strategy:
+      fail-fast: false
+      matrix:
+        dotnet-version: ${{ fromJSON(inputs.dotnet-versions) }}
+
+    steps:
+      # ── Checkout ──────────────────────────────────────────────────────
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ── .NET setup ───────────────────────────────────────────────────
+      - name: Setup .NET ${{ matrix.dotnet-version }}
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ matrix.dotnet-version }}
+
+      # ── NuGet cache ──────────────────────────────────────────────────
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ matrix.dotnet-version }}-${{ hashFiles('**/*.csproj', '**/*.fsproj', '**/Directory.Packages.props') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-${{ matrix.dotnet-version }}-
+
+      # ── Restore ──────────────────────────────────────────────────────
+      - name: Restore dependencies
+        run: dotnet restore ${{ inputs.solution-file }}
+        env:
+          NUGET_AUTH_TOKEN: ${{ secrets.nuget-auth-token }}
+
+      # ── Format check ─────────────────────────────────────────────────
+      - name: Check formatting
+        if: inputs.enable-format-check
+        run: dotnet format ${{ inputs.solution-file }} --verify-no-changes --verbosity diagnostic
+
+      # ── Build ─────────────────────────────────────────────────────────
+      - name: Build
+        run: dotnet build ${{ inputs.solution-file }} --no-restore --configuration ${{ inputs.build-configuration }}
+
+      # ── Test ──────────────────────────────────────────────────────────
+      - name: Test
+        if: inputs.enable-test
+        run: |
+          dotnet test ${{ inputs.solution-file }} \
+            --no-build \
+            --configuration ${{ inputs.build-configuration }} \
+            --verbosity normal \
+            --collect:"XPlat Code Coverage" \
+            --results-directory ./test-results \
+            ${{ inputs.dotnet-test-args }}
+
+      # ── Test results ─────────────────────────────────────────────────
+      - name: Upload test results
+        if: always() && inputs.enable-test
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-dotnet-${{ matrix.dotnet-version }}
+          path: ${{ inputs.working-directory }}/test-results/
+          retention-days: 7
+          if-no-files-found: ignore
+
+      # ── Coverage ──────────────────────────────────────────────────────
+      - name: Upload coverage to Codecov
+        if: inputs.enable-coverage && inputs.enable-test
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.codecov-token }}
+          directory: ./test-results
+          flags: dotnet-${{ matrix.dotnet-version }}
+          fail_ci_if_error: false

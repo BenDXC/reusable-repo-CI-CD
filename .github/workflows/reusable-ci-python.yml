@@ -1,0 +1,190 @@
+# ============================================================================
+# Reusable CI Workflow — Python
+# ============================================================================
+# Supports pip, pipenv, and poetry. Runs linting (ruff), type-checking (mypy),
+# tests (pytest) with coverage, and optional security scanning.
+#
+# Usage (caller workflow):
+#   jobs:
+#     ci:
+#       uses: <owner>/<repo>/.github/workflows/reusable-ci-python.yml@main
+#       with:
+#         python-versions: '["3.11", "3.12", "3.13"]'
+# ============================================================================
+
+name: "CI — Python"
+
+on:
+  workflow_call:
+    inputs:
+      python-versions:
+        description: "JSON array of Python versions to test"
+        type: string
+        default: '["3.12"]'
+      package-manager:
+        description: "Package manager: pip | pipenv | poetry"
+        type: string
+        default: "pip"
+      working-directory:
+        description: "Working directory for the project"
+        type: string
+        default: "."
+      enable-lint:
+        description: "Run linting with ruff"
+        type: boolean
+        default: true
+      enable-type-check:
+        description: "Run type checking with mypy"
+        type: boolean
+        default: false
+      enable-test:
+        description: "Run tests with pytest"
+        type: boolean
+        default: true
+      enable-coverage:
+        description: "Upload coverage reports"
+        type: boolean
+        default: false
+      requirements-file:
+        description: "Path to requirements file (for pip)"
+        type: string
+        default: "requirements.txt"
+      extra-system-deps:
+        description: "Extra apt packages to install (space-separated)"
+        type: string
+        default: ""
+      pytest-args:
+        description: "Additional arguments for pytest"
+        type: string
+        default: ""
+      ruff-args:
+        description: "Additional arguments for ruff"
+        type: string
+        default: ""
+    secrets:
+      codecov-token:
+        description: "Codecov upload token"
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  python-ci:
+    name: "Python ${{ matrix.python-version }}"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ${{ fromJSON(inputs.python-versions) }}
+
+    steps:
+      # ── Checkout ──────────────────────────────────────────────────────
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ── System dependencies ───────────────────────────────────────────
+      - name: Install system dependencies
+        if: inputs.extra-system-deps != ''
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ${{ inputs.extra-system-deps }}
+
+      # ── Python setup ──────────────────────────────────────────────────
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # ── Cache ─────────────────────────────────────────────────────────
+      - name: Cache pip packages
+        if: inputs.package-manager == 'pip'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('**/requirements*.txt', '**/setup.py', '**/setup.cfg', '**/pyproject.toml') }}
+          restore-keys: |
+            pip-${{ runner.os }}-${{ matrix.python-version }}-
+
+      - name: Cache Poetry
+        if: inputs.package-manager == 'poetry'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pypoetry
+            .venv
+          key: poetry-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('**/poetry.lock') }}
+          restore-keys: |
+            poetry-${{ runner.os }}-${{ matrix.python-version }}-
+
+      - name: Cache Pipenv
+        if: inputs.package-manager == 'pipenv'
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/virtualenvs
+          key: pipenv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('**/Pipfile.lock') }}
+          restore-keys: |
+            pipenv-${{ runner.os }}-${{ matrix.python-version }}-
+
+      # ── Install dependencies ──────────────────────────────────────────
+      - name: Install dependencies (pip)
+        if: inputs.package-manager == 'pip'
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f "${{ inputs.requirements-file }}" ]; then
+            pip install -r "${{ inputs.requirements-file }}"
+          fi
+          if [ -f "requirements-dev.txt" ]; then
+            pip install -r requirements-dev.txt
+          fi
+          if [ -f "pyproject.toml" ]; then
+            pip install -e ".[dev]" 2>/dev/null || pip install -e . 2>/dev/null || true
+          fi
+
+      - name: Install dependencies (poetry)
+        if: inputs.package-manager == 'poetry'
+        run: |
+          pip install poetry
+          poetry config virtualenvs.in-project true
+          poetry install --no-interaction --no-ansi
+
+      - name: Install dependencies (pipenv)
+        if: inputs.package-manager == 'pipenv'
+        run: |
+          pip install pipenv
+          pipenv install --dev --deploy
+
+      # ── Lint ──────────────────────────────────────────────────────────
+      - name: Lint with ruff
+        if: inputs.enable-lint
+        run: |
+          pip install ruff
+          ruff check ${{ inputs.ruff-args }} .
+          ruff format --check .
+
+      # ── Type check ───────────────────────────────────────────────────
+      - name: Type check with mypy
+        if: inputs.enable-type-check
+        run: |
+          pip install mypy
+          mypy .
+
+      # ── Test ──────────────────────────────────────────────────────────
+      - name: Run tests with pytest
+        if: inputs.enable-test
+        run: |
+          pip install pytest pytest-cov
+          pytest ${{ inputs.pytest-args }} --cov --cov-report=xml --cov-report=term-missing -v
+
+      # ── Coverage ──────────────────────────────────────────────────────
+      - name: Upload coverage to Codecov
+        if: inputs.enable-coverage && inputs.enable-test
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.codecov-token }}
+          file: ./coverage.xml
+          flags: python-${{ matrix.python-version }}
+          fail_ci_if_error: false

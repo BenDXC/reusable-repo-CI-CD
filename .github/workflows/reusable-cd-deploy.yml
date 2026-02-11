@@ -1,0 +1,310 @@
+# ============================================================================
+# Reusable CD Workflow — Cloud Deployment
+# ============================================================================
+# Deploy container images or applications to major cloud providers:
+# AWS (ECS / Lambda), GCP (Cloud Run), Azure (Container Apps).
+# Supports environment-based deployments with approval gates.
+#
+# Usage (caller workflow):
+#   jobs:
+#     deploy:
+#       uses: <owner>/<repo>/.github/workflows/reusable-cd-deploy.yml@main
+#       with:
+#         provider: "aws"
+#         target: "ecs"
+#         image: "ghcr.io/myorg/myapp:latest"
+#         environment: "production"
+# ============================================================================
+
+name: "CD — Cloud Deploy"
+
+on:
+  workflow_call:
+    inputs:
+      provider:
+        description: "Cloud provider: aws | gcp | azure"
+        type: string
+        required: true
+      target:
+        description: "Deployment target: ecs | lambda | cloud-run | container-apps | app-service"
+        type: string
+        required: true
+      image:
+        description: "Full image reference (registry/image:tag@digest)"
+        type: string
+        required: true
+      environment:
+        description: "Deployment environment name (maps to GitHub Environment)"
+        type: string
+        default: "production"
+
+      # ── AWS specific ─────────────────────────────────────────────────
+      aws-region:
+        description: "AWS region"
+        type: string
+        default: "us-east-1"
+      ecs-cluster:
+        description: "ECS cluster name"
+        type: string
+        default: ""
+      ecs-service:
+        description: "ECS service name"
+        type: string
+        default: ""
+      ecs-task-definition:
+        description: "Path to ECS task definition JSON file"
+        type: string
+        default: ""
+      ecs-container-name:
+        description: "Container name in ECS task definition"
+        type: string
+        default: "app"
+      lambda-function-name:
+        description: "Lambda function name"
+        type: string
+        default: ""
+
+      # ── GCP specific ─────────────────────────────────────────────────
+      gcp-project-id:
+        description: "GCP project ID"
+        type: string
+        default: ""
+      gcp-region:
+        description: "GCP region"
+        type: string
+        default: "us-central1"
+      cloud-run-service:
+        description: "Cloud Run service name"
+        type: string
+        default: ""
+      cloud-run-flags:
+        description: "Additional gcloud run deploy flags"
+        type: string
+        default: "--allow-unauthenticated"
+
+      # ── Azure specific ───────────────────────────────────────────────
+      azure-resource-group:
+        description: "Azure resource group"
+        type: string
+        default: ""
+      azure-container-app:
+        description: "Azure Container App name"
+        type: string
+        default: ""
+      azure-app-service:
+        description: "Azure App Service name"
+        type: string
+        default: ""
+
+    secrets:
+      aws-access-key-id:
+        description: "AWS access key ID"
+        required: false
+      aws-secret-access-key:
+        description: "AWS secret access key"
+        required: false
+      aws-role-to-assume:
+        description: "AWS IAM role ARN for OIDC"
+        required: false
+      gcp-credentials:
+        description: "GCP service account key JSON"
+        required: false
+      gcp-workload-identity-provider:
+        description: "GCP Workload Identity Federation provider"
+        required: false
+      gcp-service-account:
+        description: "GCP service account email"
+        required: false
+      azure-credentials:
+        description: "Azure credentials JSON"
+        required: false
+      azure-client-id:
+        description: "Azure client ID for OIDC"
+        required: false
+      azure-tenant-id:
+        description: "Azure tenant ID for OIDC"
+        required: false
+      azure-subscription-id:
+        description: "Azure subscription ID for OIDC"
+        required: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  # ════════════════════════════════════════════════════════════════════════
+  # AWS Deployment
+  # ════════════════════════════════════════════════════════════════════════
+  deploy-aws:
+    name: "Deploy to AWS (${{ inputs.target }})"
+    if: inputs.provider == 'aws'
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        if: secrets.aws-role-to-assume != ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.aws-role-to-assume }}
+          aws-region: ${{ inputs.aws-region }}
+
+      - name: Configure AWS credentials (Access Keys)
+        if: secrets.aws-role-to-assume == ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.aws-access-key-id }}
+          aws-secret-access-key: ${{ secrets.aws-secret-access-key }}
+          aws-region: ${{ inputs.aws-region }}
+
+      # ── ECS Deploy ──────────────────────────────────────────────────
+      - name: Download task definition
+        if: inputs.target == 'ecs' && inputs.ecs-task-definition != ''
+        run: |
+          cat ${{ inputs.ecs-task-definition }}
+
+      - name: Render ECS task definition
+        if: inputs.target == 'ecs'
+        id: render-task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: ${{ inputs.ecs-task-definition }}
+          container-name: ${{ inputs.ecs-container-name }}
+          image: ${{ inputs.image }}
+
+      - name: Deploy to ECS
+        if: inputs.target == 'ecs'
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.render-task-def.outputs.task-definition }}
+          service: ${{ inputs.ecs-service }}
+          cluster: ${{ inputs.ecs-cluster }}
+          wait-for-service-stability: true
+
+      # ── Lambda Deploy ────────────────────────────────────────────────
+      - name: Deploy to Lambda
+        if: inputs.target == 'lambda'
+        run: |
+          aws lambda update-function-code \
+            --function-name "${{ inputs.lambda-function-name }}" \
+            --image-uri "${{ inputs.image }}"
+          echo "Waiting for function update..."
+          aws lambda wait function-updated \
+            --function-name "${{ inputs.lambda-function-name }}"
+
+      - name: Deployment summary (AWS)
+        run: |
+          echo "## AWS Deployment Complete" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Property | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| --- | --- |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Target** | ${{ inputs.target }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Region** | ${{ inputs.aws-region }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Image** | \`${{ inputs.image }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Environment** | ${{ inputs.environment }} |" >> "$GITHUB_STEP_SUMMARY"
+
+  # ════════════════════════════════════════════════════════════════════════
+  # GCP Deployment
+  # ════════════════════════════════════════════════════════════════════════
+  deploy-gcp:
+    name: "Deploy to GCP (${{ inputs.target }})"
+    if: inputs.provider == 'gcp'
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to GCP (Workload Identity)
+        if: secrets.gcp-workload-identity-provider != ''
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.gcp-workload-identity-provider }}
+          service_account: ${{ secrets.gcp-service-account }}
+
+      - name: Authenticate to GCP (Service Account Key)
+        if: secrets.gcp-workload-identity-provider == '' && secrets.gcp-credentials != ''
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.gcp-credentials }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      # ── Cloud Run Deploy ─────────────────────────────────────────────
+      - name: Deploy to Cloud Run
+        if: inputs.target == 'cloud-run'
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: ${{ inputs.cloud-run-service }}
+          image: ${{ inputs.image }}
+          region: ${{ inputs.gcp-region }}
+          project_id: ${{ inputs.gcp-project-id }}
+          flags: ${{ inputs.cloud-run-flags }}
+
+      - name: Deployment summary (GCP)
+        run: |
+          echo "## GCP Deployment Complete" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Property | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| --- | --- |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Target** | ${{ inputs.target }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Region** | ${{ inputs.gcp-region }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Image** | \`${{ inputs.image }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Environment** | ${{ inputs.environment }} |" >> "$GITHUB_STEP_SUMMARY"
+
+  # ════════════════════════════════════════════════════════════════════════
+  # Azure Deployment
+  # ════════════════════════════════════════════════════════════════════════
+  deploy-azure:
+    name: "Deploy to Azure (${{ inputs.target }})"
+    if: inputs.provider == 'azure'
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        if: secrets.azure-client-id != ''
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.azure-client-id }}
+          tenant-id: ${{ secrets.azure-tenant-id }}
+          subscription-id: ${{ secrets.azure-subscription-id }}
+
+      - name: Azure login (Service Principal)
+        if: secrets.azure-client-id == '' && secrets.azure-credentials != ''
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.azure-credentials }}
+
+      # ── Container Apps Deploy ────────────────────────────────────────
+      - name: Deploy to Azure Container Apps
+        if: inputs.target == 'container-apps'
+        uses: azure/container-apps-deploy-action@v1
+        with:
+          resourceGroup: ${{ inputs.azure-resource-group }}
+          containerAppName: ${{ inputs.azure-container-app }}
+          imageToDeploy: ${{ inputs.image }}
+
+      # ── App Service Deploy ───────────────────────────────────────────
+      - name: Deploy to Azure App Service
+        if: inputs.target == 'app-service'
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ inputs.azure-app-service }}
+          images: ${{ inputs.image }}
+
+      - name: Deployment summary (Azure)
+        run: |
+          echo "## Azure Deployment Complete" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Property | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| --- | --- |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Target** | ${{ inputs.target }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Image** | \`${{ inputs.image }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Environment** | ${{ inputs.environment }} |" >> "$GITHUB_STEP_SUMMARY"
