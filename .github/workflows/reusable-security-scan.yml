@@ -128,7 +128,7 @@ jobs:
 
       - name: Run Trivy (filesystem)
         if: inputs.trivy-scan-type == 'fs'
-        uses: aquasecurity/trivy-action@0.30.0
+        uses: aquasecurity/trivy-action@0.35.0
         with:
           scan-type: fs
           scan-ref: ${{ inputs.working-directory }}
@@ -138,7 +138,7 @@ jobs:
 
       - name: Run Trivy (image)
         if: inputs.trivy-scan-type == 'image'
-        uses: aquasecurity/trivy-action@0.30.0
+        uses: aquasecurity/trivy-action@0.35.0
         with:
           scan-type: image
           image-ref: ${{ inputs.trivy-image-ref }}
